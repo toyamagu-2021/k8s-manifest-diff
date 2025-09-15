@@ -16,6 +16,36 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+// ChangeType represents the type of change for a resource
+type ChangeType int
+
+const (
+	// Unchanged indicates that a resource exists in both base and head with no changes
+	Unchanged ChangeType = iota
+	// Changed indicates that a resource exists in both base and head with changes
+	Changed
+	// Created indicates that a resource exists only in head (newly created)
+	Created
+	// Deleted indicates that a resource exists only in base (deleted)
+	Deleted
+)
+
+// String returns the string representation of ChangeType
+func (ct ChangeType) String() string {
+	switch ct {
+	case Unchanged:
+		return "unchanged"
+	case Changed:
+		return "changed"
+	case Created:
+		return "created"
+	case Deleted:
+		return "deleted"
+	default:
+		return "unknown"
+	}
+}
+
 // Options controls the diff behavior
 type Options struct {
 	ExcludeKinds       []string          // List of Kinds to exclude from diff
@@ -42,32 +72,32 @@ type objBaseHead struct {
 }
 
 // YamlString compares two YAML strings and returns the diff
-// Returns: (diff string, has differences bool, error)
-func YamlString(baseYaml, headYaml string, opts *Options) (string, bool, error) {
+// Returns: (diff string, resource changes map[kube.ResourceKey]ChangeType, has differences bool, error)
+func YamlString(baseYaml, headYaml string, opts *Options) (string, map[kube.ResourceKey]ChangeType, bool, error) {
 	baseReader := strings.NewReader(baseYaml)
 	headReader := strings.NewReader(headYaml)
 	return Yaml(baseReader, headReader, opts)
 }
 
 // Yaml compares YAML from two io.Reader sources and returns the diff
-// Returns: (diff string, has differences bool, error)
-func Yaml(baseReader, headReader io.Reader, opts *Options) (string, bool, error) {
+// Returns: (diff string, resource changes map[kube.ResourceKey]ChangeType, has differences bool, error)
+func Yaml(baseReader, headReader io.Reader, opts *Options) (string, map[kube.ResourceKey]ChangeType, bool, error) {
 	baseObjects, err := parser.ParseYAML(baseReader)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to parse base YAML: %w", err)
+		return "", nil, false, fmt.Errorf("failed to parse base YAML: %w", err)
 	}
 
 	headObjects, err := parser.ParseYAML(headReader)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to parse head YAML: %w", err)
+		return "", nil, false, fmt.Errorf("failed to parse head YAML: %w", err)
 	}
 
 	return Objects(baseObjects, headObjects, opts)
 }
 
 // Objects compares two sets of Kubernetes objects and returns the diff
-// Returns: (diff string, has differences bool, error)
-func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, bool, error) {
+// Returns: (diff string, resource changes map[kube.ResourceKey]ChangeType, has differences bool, error)
+func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, map[kube.ResourceKey]ChangeType, bool, error) {
 	if opts == nil {
 		opts = DefaultOptions()
 	}
@@ -77,21 +107,47 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, bo
 	objMap := parseObjsToMap(base, head)
 	foundDiff := false
 	diff := ""
+	resourceChanges := make(map[kube.ResourceKey]ChangeType)
 
 	for k, v := range objMap {
-		if reflect.DeepEqual(v.base, v.head) {
-			continue
-		}
+		changeType := determineChangeType(v.base, v.head)
+		resourceChanges[k] = changeType
 
-		foundDiff = true
-		diffStr, code, err := getDiffStr(k.Name, v.head, v.base, opts)
-		if code > 1 {
-			return "", false, err
+		// Generate diff output only for resources that need it
+		if needsDiff := requiresDiffOutput(changeType); needsDiff {
+			foundDiff = true
+			diffStr, code, err := getDiffStr(k.Name, v.head, v.base, opts)
+			if code > 1 {
+				return "", nil, false, err
+			}
+			header := fmt.Sprintf("===== %s/%s %s/%s ======\n", k.Group, k.Kind, k.Namespace, k.Name)
+			diff += header + diffStr
 		}
-		header := fmt.Sprintf("===== %s/%s %s/%s ======\n", k.Group, k.Kind, k.Namespace, k.Name)
-		diff += header + diffStr
 	}
-	return diff, foundDiff, nil
+	return diff, resourceChanges, foundDiff, nil
+}
+
+// determineChangeType determines the type of change between base and head objects
+func determineChangeType(base, head *unstructured.Unstructured) ChangeType {
+	switch {
+	case base == nil && head != nil:
+		// Resource exists only in head (newly created)
+		return Created
+	case base != nil && head == nil:
+		// Resource exists only in base (deleted)
+		return Deleted
+	case reflect.DeepEqual(base, head):
+		// Resource exists in both with no changes
+		return Unchanged
+	default:
+		// Resource exists in both with changes
+		return Changed
+	}
+}
+
+// requiresDiffOutput determines if a change type requires diff output generation
+func requiresDiffOutput(changeType ChangeType) bool {
+	return changeType != Unchanged
 }
 
 // FilterResources removes resources based on the provided options
