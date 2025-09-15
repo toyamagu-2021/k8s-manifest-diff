@@ -113,21 +113,26 @@ Supports filtering options to exclude specific resource types.`,
 		}
 
 		// Perform diff
-		diffResult, changedResources, hasDiff, err := diff.Objects(baseObjs, headObjs, opts)
+		diffResult, resourceChanges, hasDiff, err := diff.Objects(baseObjs, headObjs, opts)
 		if err != nil {
 			return fmt.Errorf("failed to diff objects: %w", err)
 		}
 
 		if hasDiff {
 			if summary {
-				// Output only the list of changed resources
-				for _, resource := range changedResources {
+				// Output only the list of changed resources with their change types
+				for resource, changeType := range resourceChanges {
+					// Skip unchanged resources in summary mode
+					if changeType == diff.Unchanged {
+						continue
+					}
+
 					// Format ResourceKey as string for output
 					resourceID := fmt.Sprintf("%s/%s", resource.Kind, resource.Name)
 					if resource.Namespace != "" {
 						resourceID = fmt.Sprintf("%s/%s/%s", resource.Kind, resource.Namespace, resource.Name)
 					}
-					fmt.Println(resourceID)
+					fmt.Printf("%s (%s)\n", resourceID, changeType.String())
 				}
 			} else {
 				// Output the full diff

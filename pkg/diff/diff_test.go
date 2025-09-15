@@ -10,12 +10,55 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// formatResourceKey formats a ResourceKey for testing comparison
-func formatResourceKey(key kube.ResourceKey) string {
-	if key.Namespace != "" {
-		return fmt.Sprintf("%s/%s/%s", key.Kind, key.Namespace, key.Name)
+// getResourcesWithChangeType extracts resources with specific change types from the resource changes map
+func getResourcesWithChangeType(resourceChanges map[kube.ResourceKey]ChangeType, changeTypes ...ChangeType) []kube.ResourceKey {
+	var result []kube.ResourceKey
+	for resource, changeType := range resourceChanges {
+		for _, ct := range changeTypes {
+			if changeType == ct {
+				result = append(result, resource)
+				break
+			}
+		}
 	}
-	return fmt.Sprintf("%s/%s", key.Kind, key.Name)
+	return result
+}
+
+// getChangedResources extracts resources that have any type of change (Created, Changed, Deleted)
+func getChangedResources(resourceChanges map[kube.ResourceKey]ChangeType) []kube.ResourceKey {
+	return getResourcesWithChangeType(resourceChanges, Created, Changed, Deleted)
+}
+
+// parseResourceKey parses a string resource key into kube.ResourceKey
+func parseResourceKey(key string) kube.ResourceKey {
+	parts := strings.Split(key, "/")
+	switch len(parts) {
+	case 2: // Kind/Name (cluster-scoped)
+		return kube.ResourceKey{
+			Kind: parts[0],
+			Name: parts[1],
+		}
+	case 3: // Kind/Namespace/Name (namespaced)
+		return kube.ResourceKey{
+			Kind:      parts[0],
+			Namespace: parts[1],
+			Name:      parts[2],
+		}
+	default:
+		// Fallback - shouldn't happen with well-formed keys
+		return kube.ResourceKey{Name: key}
+	}
+}
+
+// assertResourceChange checks if a specific resource has the expected change type
+func assertResourceChange(t *testing.T, resourceChanges map[kube.ResourceKey]ChangeType, expectedKey string, expectedChangeType ChangeType) {
+	expectedResourceKey := parseResourceKey(expectedKey)
+	changeType, found := resourceChanges[expectedResourceKey]
+	if found {
+		assert.Equal(t, expectedChangeType, changeType, "Expected change type %s for resource %s, got %s", expectedChangeType.String(), expectedKey, changeType.String())
+	} else {
+		assert.True(t, found, "Resource %s not found in resource changes", expectedKey)
+	}
 }
 
 func TestLabelSelectorFiltering(t *testing.T) {
@@ -296,10 +339,9 @@ func TestObjectsWithLabelSelector(t *testing.T) {
 		assert.NotContains(t, diffResult, "excluded-config")
 
 		// Check changed resources list
-		assert.Equal(t, 1, len(changedResources))
-		expected := "ConfigMap/default/config"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "ConfigMap/default/config", Changed)
 	})
 
 	t.Run("diff with non-matching label selector", func(t *testing.T) {
@@ -350,18 +392,21 @@ data:
 		assert.Contains(t, diffResult, "new-value")
 
 		// Check changed resources list
-		assert.Equal(t, 1, len(changedResources))
-		expected := "ConfigMap/default/test-config"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "ConfigMap/default/test-config", Changed)
 	})
 
 	t.Run("no diff when identical", func(t *testing.T) {
-		diffResult, changedResources, hasDiff, err := YamlString(baseYaml, baseYaml, nil)
+		diffResult, resourceChanges, hasDiff, err := YamlString(baseYaml, baseYaml, nil)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
 		assert.Equal(t, "", diffResult)
-		assert.Equal(t, 0, len(changedResources))
+		// The resource should exist but be unchanged
+		changedResourcesList := getChangedResources(resourceChanges)
+		assert.Equal(t, 0, len(changedResourcesList))
+		// Check that the resource exists as unchanged
+		assertResourceChange(t, resourceChanges, "ConfigMap/default/test-config", Unchanged)
 	})
 
 	t.Run("error on invalid base yaml", func(t *testing.T) {
@@ -416,21 +461,24 @@ spec:
 		assert.Contains(t, diffResult, "nginx:1.21")
 
 		// Check changed resources list
-		assert.Equal(t, 1, len(changedResources))
-		expected := "Pod/default/test-pod"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "Pod/default/test-pod", Changed)
 	})
 
 	t.Run("no diff when identical", func(t *testing.T) {
 		baseReader := strings.NewReader(baseYaml)
 		headReader := strings.NewReader(baseYaml)
 
-		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
+		diffResult, resourceChanges, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
 		assert.Equal(t, "", diffResult)
-		assert.Equal(t, 0, len(changedResources))
+		// The resource should exist but be unchanged
+		changedResourcesList := getChangedResources(resourceChanges)
+		assert.Equal(t, 0, len(changedResourcesList))
+		// Check that the resource exists as unchanged
+		assertResourceChange(t, resourceChanges, "Pod/default/test-pod", Unchanged)
 	})
 
 	t.Run("multiple objects in yaml", func(t *testing.T) {
@@ -478,10 +526,9 @@ data:
 		assert.NotContains(t, diffResult, "config1")
 
 		// Check changed resources list - only config2 should be changed
-		assert.Equal(t, 1, len(changedResources))
-		expected := "ConfigMap/config2"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "ConfigMap/config2", Changed)
 	})
 
 	t.Run("empty yaml", func(t *testing.T) {
@@ -494,10 +541,9 @@ data:
 		assert.Contains(t, diffResult, "test-pod")
 
 		// Check changed resources list - new resource added
-		assert.Equal(t, 1, len(changedResources))
-		expected := "Pod/default/test-pod"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "Pod/default/test-pod", Created)
 	})
 }
 
@@ -553,10 +599,9 @@ func TestSecretMasking(t *testing.T) {
 		assert.Contains(t, diffResult, "++++++++++++++++")
 
 		// Check changed resources list
-		assert.Equal(t, 1, len(changedResources))
-		expected := "Secret/default/test-secret"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "Secret/default/test-secret", Changed)
 	})
 
 	t.Run("same values get same mask, different values get different masks", func(t *testing.T) {
@@ -1038,11 +1083,15 @@ func TestObjects(t *testing.T) {
 		head := []*unstructured.Unstructured{&obj}
 		base := []*unstructured.Unstructured{&obj}
 		opts := DefaultOptions()
-		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
+		diffResult, resourceChanges, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
 		assert.Equal(t, "", diffResult)
-		assert.Equal(t, 0, len(changedResources))
+		// The resource should exist but be unchanged
+		changedResourcesList := getChangedResources(resourceChanges)
+		assert.Equal(t, 0, len(changedResourcesList))
+		// Check that the resource exists as unchanged
+		assertResourceChange(t, resourceChanges, "Pod/namespace/test", Unchanged)
 	})
 
 	t.Run("exists only head", func(t *testing.T) {
@@ -1058,10 +1107,9 @@ func TestObjects(t *testing.T) {
 		assert.True(t, strings.Contains(diffResult, "kind: Pod"))
 
 		// Check changed resources list - new resource added
-		assert.Equal(t, 1, len(changedResources))
-		expected := "Pod/namespace/test"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "Pod/namespace/test", Created)
 	})
 
 	t.Run("exists only base", func(t *testing.T) {
@@ -1074,10 +1122,9 @@ func TestObjects(t *testing.T) {
 		assert.True(t, strings.Contains(diffResult, "===== /Pod namespace/test ======"))
 
 		// Check changed resources list - resource deleted
-		assert.Equal(t, 1, len(changedResources))
-		expected := "Pod/namespace/test"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "Pod/namespace/test", Deleted)
 	})
 
 	t.Run("workflow excluded by default", func(t *testing.T) {
@@ -1090,10 +1137,9 @@ func TestObjects(t *testing.T) {
 		assert.Contains(t, diffResult, "Pod")
 
 		// Check changed resources list
-		assert.Equal(t, 1, len(changedResources))
-		expected := "Pod/namespace/test"
-		actual := formatResourceKey(changedResources[0])
-		assert.Equal(t, expected, actual)
+		changedResourcesList := getChangedResources(changedResources)
+		assert.Equal(t, 1, len(changedResourcesList))
+		assertResourceChange(t, changedResources, "Pod/namespace/test", Created)
 	})
 }
 
@@ -1256,8 +1302,7 @@ func TestObjectsWithNilOptions(t *testing.T) {
 	assert.Contains(t, diffResult, "ConfigMap")
 
 	// Check changed resources list
-	assert.Equal(t, 1, len(changedResources))
-	expected := "ConfigMap/test/config"
-	actual := formatResourceKey(changedResources[0])
-	assert.Equal(t, expected, actual)
+	changedResourcesList := getChangedResources(changedResources)
+	assert.Equal(t, 1, len(changedResourcesList))
+	assertResourceChange(t, changedResources, "ConfigMap/test/config", Created)
 }
