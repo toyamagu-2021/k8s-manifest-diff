@@ -34,7 +34,6 @@ jobs:
 
       - name: Run tests
         run: |
-          source .env
           make test
 
       - name: Build binary
