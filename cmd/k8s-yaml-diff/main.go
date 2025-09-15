@@ -113,12 +113,12 @@ Supports filtering options to exclude specific resource types.`,
 		}
 
 		// Perform diff
-		results, hasDiff, err := diff.Objects(baseObjs, headObjs, opts)
+		results, err := diff.Objects(baseObjs, headObjs, opts)
 		if err != nil {
 			return fmt.Errorf("failed to diff objects: %w", err)
 		}
 
-		if hasDiff {
+		if results.HasChanges() {
 			if summary {
 				fmt.Print(results.StringSummary())
 			} else {
