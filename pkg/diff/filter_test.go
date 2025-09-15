@@ -215,6 +215,290 @@ func TestFilterResources_LabelSelectorWithExcludeKinds(t *testing.T) {
 	}
 }
 
+func TestFilterResources_AnnotationSelector(t *testing.T) {
+	frontendObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"name":      "frontend-app",
+				"namespace": "default",
+				"annotations": map[string]any{
+					"app.kubernetes.io/managed-by": "helm",
+					"deployment.category":          "web",
+					"environment":                  "production",
+				},
+			},
+		},
+	}
+
+	backendObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"name":      "backend-app",
+				"namespace": "default",
+				"annotations": map[string]any{
+					"app.kubernetes.io/managed-by": "kubectl",
+					"deployment.category":          "api",
+					"environment":                  "production",
+				},
+			},
+		},
+	}
+
+	stagingObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "staging-config",
+				"namespace": "staging",
+				"annotations": map[string]any{
+					"app.kubernetes.io/managed-by": "helm",
+					"config.category":              "staging",
+					"environment":                  "staging",
+				},
+			},
+		},
+	}
+
+	noAnnotationsObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "secret",
+				"namespace": "default",
+			},
+		},
+	}
+
+	objects := []*unstructured.Unstructured{frontendObj, backendObj, stagingObj, noAnnotationsObj}
+
+	tests := []struct {
+		name               string
+		annotationSelector map[string]string
+		expectedCount      int
+		expectedNames      []string
+		notExpectedNames   []string
+	}{
+		{
+			name:               "managed-by helm selector",
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "helm"},
+			expectedCount:      2,
+			expectedNames:      []string{"frontend-app", "staging-config"},
+			notExpectedNames:   []string{"backend-app", "secret"},
+		},
+		{
+			name:               "multiple annotation selectors (AND logic)",
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "helm", "environment": "production"},
+			expectedCount:      1,
+			expectedNames:      []string{"frontend-app"},
+			notExpectedNames:   []string{"backend-app", "staging-config", "secret"},
+		},
+		{
+			name:               "environment production selector",
+			annotationSelector: map[string]string{"environment": "production"},
+			expectedCount:      2,
+			expectedNames:      []string{"frontend-app", "backend-app"},
+			notExpectedNames:   []string{"staging-config", "secret"},
+		},
+		{
+			name:               "deployment category web selector",
+			annotationSelector: map[string]string{"deployment.category": "web"},
+			expectedCount:      1,
+			expectedNames:      []string{"frontend-app"},
+			notExpectedNames:   []string{"backend-app", "staging-config", "secret"},
+		},
+		{
+			name:               "empty selector returns all objects",
+			annotationSelector: nil,
+			expectedCount:      4,
+			expectedNames:      []string{"frontend-app", "backend-app", "staging-config", "secret"},
+			notExpectedNames:   []string{},
+		},
+		{
+			name:               "non-matching selector returns empty",
+			annotationSelector: map[string]string{"nonexistent": "value"},
+			expectedCount:      0,
+			expectedNames:      []string{},
+			notExpectedNames:   []string{"frontend-app", "backend-app", "staging-config", "secret"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &Options{
+				AnnotationSelector: tt.annotationSelector,
+			}
+			filtered := FilterResources(objects, opts)
+			assert.Equal(t, tt.expectedCount, len(filtered))
+
+			if tt.expectedCount > 0 {
+				names := make([]string, len(filtered))
+				for i, obj := range filtered {
+					names[i] = obj.GetName()
+				}
+
+				for _, expectedName := range tt.expectedNames {
+					assert.Contains(t, names, expectedName)
+				}
+
+				for _, notExpectedName := range tt.notExpectedNames {
+					assert.NotContains(t, names, notExpectedName)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterResources_CombinedLabelAndAnnotationSelector(t *testing.T) {
+	frontendObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"name":      "frontend-app",
+				"namespace": "default",
+				"labels": map[string]any{
+					"app":  "nginx",
+					"tier": "frontend",
+				},
+				"annotations": map[string]any{
+					"app.kubernetes.io/managed-by": "helm",
+					"deployment.category":          "web",
+				},
+			},
+		},
+	}
+
+	backendObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"name":      "backend-app",
+				"namespace": "default",
+				"labels": map[string]any{
+					"app":  "api",
+					"tier": "backend",
+				},
+				"annotations": map[string]any{
+					"app.kubernetes.io/managed-by": "kubectl",
+					"deployment.category":          "api",
+				},
+			},
+		},
+	}
+
+	configObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "app-config",
+				"namespace": "default",
+				"labels": map[string]any{
+					"app":  "nginx",
+					"tier": "config",
+				},
+				"annotations": map[string]any{
+					"app.kubernetes.io/managed-by": "helm",
+					"config.category":              "web",
+				},
+			},
+		},
+	}
+
+	objects := []*unstructured.Unstructured{frontendObj, backendObj, configObj}
+
+	tests := []struct {
+		name               string
+		labelSelector      map[string]string
+		annotationSelector map[string]string
+		expectedCount      int
+		expectedNames      []string
+		notExpectedNames   []string
+	}{
+		{
+			name:               "both label and annotation match (AND logic)",
+			labelSelector:      map[string]string{"app": "nginx"},
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "helm"},
+			expectedCount:      2,
+			expectedNames:      []string{"frontend-app", "app-config"},
+			notExpectedNames:   []string{"backend-app"},
+		},
+		{
+			name:               "label matches but annotation doesn't",
+			labelSelector:      map[string]string{"app": "nginx"},
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "kubectl"},
+			expectedCount:      0,
+			expectedNames:      []string{},
+			notExpectedNames:   []string{"frontend-app", "backend-app", "app-config"},
+		},
+		{
+			name:               "annotation matches but label doesn't",
+			labelSelector:      map[string]string{"app": "api"},
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "helm"},
+			expectedCount:      0,
+			expectedNames:      []string{},
+			notExpectedNames:   []string{"frontend-app", "backend-app", "app-config"},
+		},
+		{
+			name:               "multiple label and annotation selectors",
+			labelSelector:      map[string]string{"app": "nginx", "tier": "frontend"},
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "helm", "deployment.category": "web"},
+			expectedCount:      1,
+			expectedNames:      []string{"frontend-app"},
+			notExpectedNames:   []string{"backend-app", "app-config"},
+		},
+		{
+			name:               "only label selector",
+			labelSelector:      map[string]string{"tier": "backend"},
+			annotationSelector: nil,
+			expectedCount:      1,
+			expectedNames:      []string{"backend-app"},
+			notExpectedNames:   []string{"frontend-app", "app-config"},
+		},
+		{
+			name:               "only annotation selector",
+			labelSelector:      nil,
+			annotationSelector: map[string]string{"deployment.category": "api"},
+			expectedCount:      1,
+			expectedNames:      []string{"backend-app"},
+			notExpectedNames:   []string{"frontend-app", "app-config"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &Options{
+				LabelSelector:      tt.labelSelector,
+				AnnotationSelector: tt.annotationSelector,
+			}
+			filtered := FilterResources(objects, opts)
+			assert.Equal(t, tt.expectedCount, len(filtered))
+
+			if tt.expectedCount > 0 {
+				names := make([]string, len(filtered))
+				for i, obj := range filtered {
+					names[i] = obj.GetName()
+				}
+
+				for _, expectedName := range tt.expectedNames {
+					assert.Contains(t, names, expectedName)
+				}
+
+				for _, notExpectedName := range tt.notExpectedNames {
+					assert.NotContains(t, names, notExpectedName)
+				}
+			}
+		})
+	}
+}
+
 func TestObjects_DiffOptionsFiltering(t *testing.T) {
 	hookObj := unstructured.Unstructured{
 		Object: map[string]any{
