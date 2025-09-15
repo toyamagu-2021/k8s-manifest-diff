@@ -286,32 +286,32 @@ type objBaseHead struct {
 }
 
 // YamlString compares two YAML strings and returns the diff
-// Returns: Results, bool (has differences), error
-func YamlString(baseYaml, headYaml string, opts *Options) (Results, bool, error) {
+// Returns: Results, error
+func YamlString(baseYaml, headYaml string, opts *Options) (Results, error) {
 	baseReader := strings.NewReader(baseYaml)
 	headReader := strings.NewReader(headYaml)
 	return Yaml(baseReader, headReader, opts)
 }
 
 // Yaml compares YAML from two io.Reader sources and returns the diff
-// Returns: Results, bool (has differences), error
-func Yaml(baseReader, headReader io.Reader, opts *Options) (Results, bool, error) {
+// Returns: Results, error
+func Yaml(baseReader, headReader io.Reader, opts *Options) (Results, error) {
 	baseObjects, err := parser.ParseYAML(baseReader)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to parse base YAML: %w", err)
+		return nil, fmt.Errorf("failed to parse base YAML: %w", err)
 	}
 
 	headObjects, err := parser.ParseYAML(headReader)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to parse head YAML: %w", err)
+		return nil, fmt.Errorf("failed to parse head YAML: %w", err)
 	}
 
 	return Objects(baseObjects, headObjects, opts)
 }
 
 // Objects compares two sets of Kubernetes objects and returns the diff
-// Returns: Results, bool (has differences), error
-func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, bool, error) {
+// Returns: Results, error
+func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, error) {
 	if opts == nil {
 		opts = DefaultOptions()
 	}
@@ -320,7 +320,6 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, b
 	head = FilterResources(head, opts)
 	objMap := parseObjsToMap(base, head)
 	results := make(Results)
-	foundDiff := false
 
 	for k, v := range objMap {
 		changeType := determineChangeType(v.base, v.head)
@@ -328,10 +327,9 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, b
 		var diffStr string
 		// Generate diff output only for resources that need it
 		if needsDiff := requiresDiffOutput(changeType); needsDiff {
-			foundDiff = true
 			diffOutput, code, err := getDiffStr(k.Name, v.head, v.base, opts)
 			if code > 1 {
-				return nil, false, err
+				return nil, err
 			}
 			header := fmt.Sprintf("===== %s/%s %s/%s ======\n", k.Group, k.Kind, k.Namespace, k.Name)
 			diffStr = header + diffOutput
@@ -342,7 +340,7 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, b
 			Diff: diffStr,
 		}
 	}
-	return results, foundDiff, nil
+	return results, nil
 }
 
 // determineChangeType determines the type of change between base and head objects
