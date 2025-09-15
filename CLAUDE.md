@@ -37,8 +37,8 @@ make vet
 # Run all linting tools (fmt-check, vet, staticcheck, golint, ineffassign, errcheck, misspell)
 make lint
 
-# Run tests
-go test ./... -v
+# Run tests with enhanced output
+make test
 
 # Run tests for specific package
 go test ./pkg/diff -v
@@ -93,11 +93,11 @@ The Makefile includes automatic tool installation. Tools are installed in `./bin
    - `Yaml()` and `YamlString()`: Convenience wrappers for YAML input
    - `FilterResources()`: Applies label selectors, annotation selectors, and kind exclusions
    - Uses `github.com/pmezard/go-difflib/difflib` for unified diff output
-   - Returns: (diff string, changed resources []string, has differences bool, error)
+   - Returns Results type containing ResourceKey to Result mappings
 
 3. **CLI (`cmd/k8s-yaml-diff/main.go`)**:
    - Cobra-based CLI with `diff` and `version` subcommands
-   - Supports flags: `--exclude-kinds`, `--label`, `--annotation`, `--context`, `--disable-masking-secret`
+   - Supports flags: `--exclude-kinds`, `--label`, `--annotation`, `--context`, `--disable-masking-secret`, `--summary`
    - Returns exit code 1 when differences found (standard diff behavior)
    - Version information is injected at build time via ldflags
 
@@ -105,9 +105,9 @@ The Makefile includes automatic tool installation. Tools are installed in `./bin
 
 1. Parse YAML files into `[]*unstructured.Unstructured` using parser package
 2. Apply filtering based on `Options` (exclude kinds, label/annotation selectors)
-3. Convert objects to `map[kube.ResourceKey]objBaseHead` for comparison
+3. Convert objects to `map[ResourceKey]objBaseHead` for comparison
 4. Generate unified diff using go-difflib for each changed resource
-5. Return formatted diff string with resource headers
+5. Return Results type with ResourceKey to Result mappings containing diff strings and change types
 
 ### Default Filtering Behavior
 
@@ -116,13 +116,23 @@ The Makefile includes automatic tool installation. Tools are installed in `./bin
 - Supports annotation selector filtering (exact match)
 - Context lines in diff output default to 3
 
+### Results Type System
+
+- **Results**: `map[ResourceKey]Result` - main return type containing all diff results
+- **ResourceKey**: Uniquely identifies K8s resources with Name, Namespace, Group, Kind
+- **Result**: Contains ChangeType (Created/Changed/Deleted/Unchanged) and diff string
+- **ChangeType**: Enum representing resource change status
+- Rich API for filtering: `FilterChanged()`, `FilterCreated()`, `FilterDeleted()`, etc.
+- Summary functionality: `StringSummary()` groups resources by change type
+- Statistics: `GetStatistics()` provides counts by change type
+
 ### Secret Masking
 
 - Secret data values are masked by default in diff output for security
 - Uses consistent masking: same values get identical masks, different values get different masks
 - Masks both `data` (base64) and `stringData` (plain text) fields
 - Can be disabled with `--disable-masking-secret` flag
-- Implementation follows ArgoCD gitops-engine approach
+- Implementation in `pkg/diff/secret.go`
 
 ### Exit Codes
 
@@ -142,7 +152,7 @@ The Makefile includes automatic tool installation. Tools are installed in `./bin
 
 Key dependencies:
 - `k8s.io/apimachinery`: Kubernetes API machinery for unstructured objects
-- `github.com/argoproj/gitops-engine`: GitOps engine utilities for ResourceKey
 - `github.com/pmezard/go-difflib`: Unified diff generation
 - `github.com/spf13/cobra`: CLI framework
 - `gopkg.in/yaml.v2`: YAML marshaling for diff output
+- `github.com/stretchr/testify`: Testing framework for assertions

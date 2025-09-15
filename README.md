@@ -6,7 +6,10 @@ A CLI tool and Go library for parsing Kubernetes YAML/JSON manifests and computi
 
 - CLI tool for comparing Kubernetes YAML manifests
 - Flexible filtering options (exclude kinds, label/annotation selectors)
+- Secret data masking for security (with option to disable)
+- Summary mode for high-level diff overview
 - Go library with simple API for programmatic usage
+- Unified diff output with customizable context lines
 
 ## Installation
 
@@ -54,6 +57,16 @@ Control diff context lines:
 k8s-yaml-diff diff base.yaml head.yaml --context 5
 ```
 
+Disable secret masking:
+```bash
+k8s-yaml-diff diff base.yaml head.yaml --disable-masking-secret
+```
+
+Show only summary of changes:
+```bash
+k8s-yaml-diff diff base.yaml head.yaml --summary
+```
+
 ### Version Information
 
 ```bash
@@ -99,13 +112,14 @@ data:
   key: value2
 `
 
-    diffResult, hasDiff, err := diff.YamlString(baseYaml, headYaml, nil)
+    results, err := diff.YamlString(baseYaml, headYaml, nil)
     if err != nil {
         panic(err)
     }
 
-    if hasDiff {
-        fmt.Printf("Differences found:\n%s\n", diffResult)
+    if results.HasChanges() {
+        fmt.Printf("Changed resources: %v\n", results.FilterChanged().GetResourceKeys())
+        fmt.Printf("Differences found:\n%s\n", results.StringDiff())
     } else {
         fmt.Println("No differences found")
     }
@@ -116,13 +130,22 @@ data:
 
 ```go
 opts := &diff.Options{
-    ExcludeKinds:       []string{"Job", "CronJob"},
-    LabelSelector:      map[string]string{"app": "nginx"},
-    AnnotationSelector: map[string]string{"helm.sh/managed-by": "helm"},
-    Context:            5,
+    ExcludeKinds:           []string{"Job", "CronJob"},
+    LabelSelector:          map[string]string{"app": "nginx"},
+    AnnotationSelector:     map[string]string{"helm.sh/managed-by": "helm"},
+    Context:                5,
+    DisableMaskingSecret:   false, // Enable secret masking by default
 }
 
-diffResult, hasDiff, err := diff.YamlString(baseYaml, headYaml, opts)
+results, err := diff.YamlString(baseYaml, headYaml, opts)
+if err != nil {
+    panic(err)
+}
+
+fmt.Printf("Changed resources: %v\n", results.FilterChanged().GetResourceKeys())
+if results.HasChanges() {
+    fmt.Printf("Diff:\n%s\n", results.StringDiff())
+}
 ```
 
 ## Build from Source
@@ -132,6 +155,59 @@ git clone https://github.com/toyamagu-2021/k8s-yaml-diff
 cd k8s-yaml-diff
 make build
 ```
+
+## Development
+
+### Prerequisites
+
+- Go 1.25.0 or later
+- Make
+
+### Build and Development Commands
+
+```bash
+# Build the project
+make build
+
+# Clean build artifacts
+make clean
+
+# Download and verify dependencies
+make deps
+
+# Tidy go modules
+make tidy
+
+# Format code and imports
+make fmt
+
+# Check formatting without modifying files
+make fmt-check
+
+# Run go vet
+make vet
+
+# Run all linting tools
+make lint
+
+# Run unit tests
+make test
+
+# Run E2E tests
+make test-e2e
+
+# Run all tests (unit + E2E)
+make test-all
+```
+
+### Package Architecture
+
+The project is organized into the following packages:
+
+- **`cmd/k8s-yaml-diff/`**: CLI application entry point with cobra-based commands
+- **`pkg/parser/`**: YAML/JSON parsing using k8s.io/apimachinery
+- **`pkg/diff/`**: Core diffing logic with filtering and secret masking
+- **`testing/e2e/`**: End-to-end test scenarios
 
 ## License
 
