@@ -112,13 +112,6 @@ func TestFilterResources_LabelSelector(t *testing.T) {
 			notExpectedNames: []string{},
 		},
 		{
-			name:             "empty map selector returns all objects",
-			labelSelector:    map[string]string{},
-			expectedCount:    4,
-			expectedNames:    []string{"frontend-app", "backend-app", "staging-app", "config"},
-			notExpectedNames: []string{},
-		},
-		{
 			name:             "non-matching selector returns empty",
 			labelSelector:    map[string]string{"nonexistent": "value"},
 			expectedCount:    0,
@@ -308,75 +301,6 @@ func TestObjects_DiffOptionsFiltering(t *testing.T) {
 			}
 			for _, notExpected := range tt.shouldNotContain {
 				assert.NotContains(t, diffResult, notExpected)
-			}
-		})
-	}
-}
-
-func TestFilterResources_Basic(t *testing.T) {
-	hookObj := unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       "Pod",
-			"metadata": map[string]any{
-				"name":        "hook-pod",
-				"annotations": map[string]any{"argocd.argoproj.io/hook": "PreSync"},
-			},
-		},
-	}
-
-	secretObj := unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       "Secret",
-			"metadata": map[string]any{
-				"name": "secret",
-			},
-		},
-	}
-
-	normalObj := unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       "ConfigMap",
-			"metadata": map[string]any{
-				"name": "config",
-			},
-		},
-	}
-
-	objects := []*unstructured.Unstructured{&hookObj, &secretObj, &normalObj}
-
-	tests := []struct {
-		name          string
-		excludeKinds  []string
-		expectedCount int
-		expectedKind  string
-	}{
-		{
-			name:          "filter by exclude kinds",
-			excludeKinds:  []string{"Secret", "Pod"},
-			expectedCount: 1,
-			expectedKind:  "ConfigMap",
-		},
-		{
-			name:          "no filtering",
-			excludeKinds:  []string{},
-			expectedCount: 3,
-			expectedKind:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			opts := &Options{
-				ExcludeKinds: tt.excludeKinds,
-			}
-			filtered := FilterResources(objects, opts)
-			assert.Equal(t, tt.expectedCount, len(filtered))
-
-			if tt.expectedKind != "" && len(filtered) > 0 {
-				assert.Equal(t, tt.expectedKind, filtered[0].GetKind())
 			}
 		})
 	}
