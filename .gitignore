@@ -31,7 +31,7 @@ go.work.sum
 # .idea/
 # .vscode/
 
-./k8s-yaml-diff
+k8s-yaml-diff
 /dist
 /bin
 .claude/settings.local.json
