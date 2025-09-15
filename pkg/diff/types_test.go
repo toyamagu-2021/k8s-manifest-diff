@@ -3,47 +3,46 @@ package diff
 import (
 	"testing"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestResults_FilterByType(t *testing.T) {
 	results := Results{
-		kube.ResourceKey{Kind: "Deployment", Name: "changed-app"}:   {Type: Changed, Diff: "changed diff"},
-		kube.ResourceKey{Kind: "Service", Name: "created-service"}:  {Type: Created, Diff: "created diff"},
-		kube.ResourceKey{Kind: "ConfigMap", Name: "deleted-config"}: {Type: Deleted, Diff: "deleted diff"},
-		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
+		ResourceKey{Kind: "Deployment", Name: "changed-app"}:   {Type: Changed, Diff: "changed diff"},
+		ResourceKey{Kind: "Service", Name: "created-service"}:  {Type: Created, Diff: "created diff"},
+		ResourceKey{Kind: "ConfigMap", Name: "deleted-config"}: {Type: Deleted, Diff: "deleted diff"},
+		ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
 	}
 
 	tests := []struct {
 		name          string
 		changeType    ChangeType
 		expectedCount int
-		expectedKeys  []kube.ResourceKey
+		expectedKeys  []ResourceKey
 	}{
 		{
 			name:          "filter by Changed type",
 			changeType:    Changed,
 			expectedCount: 1,
-			expectedKeys:  []kube.ResourceKey{{Kind: "Deployment", Name: "changed-app"}},
+			expectedKeys:  []ResourceKey{{Kind: "Deployment", Name: "changed-app"}},
 		},
 		{
 			name:          "filter by Created type",
 			changeType:    Created,
 			expectedCount: 1,
-			expectedKeys:  []kube.ResourceKey{{Kind: "Service", Name: "created-service"}},
+			expectedKeys:  []ResourceKey{{Kind: "Service", Name: "created-service"}},
 		},
 		{
 			name:          "filter by Deleted type",
 			changeType:    Deleted,
 			expectedCount: 1,
-			expectedKeys:  []kube.ResourceKey{{Kind: "ConfigMap", Name: "deleted-config"}},
+			expectedKeys:  []ResourceKey{{Kind: "ConfigMap", Name: "deleted-config"}},
 		},
 		{
 			name:          "filter by Unchanged type",
 			changeType:    Unchanged,
 			expectedCount: 1,
-			expectedKeys:  []kube.ResourceKey{{Kind: "Secret", Name: "unchanged-secret"}},
+			expectedKeys:  []ResourceKey{{Kind: "Secret", Name: "unchanged-secret"}},
 		},
 	}
 
@@ -68,23 +67,23 @@ func TestResults_FilterByType(t *testing.T) {
 
 func TestResults_FilterByAttributes(t *testing.T) {
 	results := Results{
-		kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
-		kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"}:       {Type: Created, Diff: "diff2"},
-		kube.ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Deleted, Diff: "diff3"},
-		kube.ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
+		ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
+		ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"}:       {Type: Created, Diff: "diff2"},
+		ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Deleted, Diff: "diff3"},
+		ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
 	}
 
 	tests := []struct {
 		name          string
 		filterFunc    func(Results) Results
 		expectedCount int
-		expectedKeys  []kube.ResourceKey
+		expectedKeys  []ResourceKey
 	}{
 		{
 			name:          "filter by Kind - Deployment",
 			filterFunc:    func(r Results) Results { return r.FilterByKind("Deployment") },
 			expectedCount: 2,
-			expectedKeys: []kube.ResourceKey{
+			expectedKeys: []ResourceKey{
 				{Kind: "Deployment", Namespace: "default", Name: "app1"},
 				{Kind: "Deployment", Namespace: "production", Name: "app2"},
 			},
@@ -93,7 +92,7 @@ func TestResults_FilterByAttributes(t *testing.T) {
 			name:          "filter by Namespace - default",
 			filterFunc:    func(r Results) Results { return r.FilterByNamespace("default") },
 			expectedCount: 3,
-			expectedKeys: []kube.ResourceKey{
+			expectedKeys: []ResourceKey{
 				{Kind: "Deployment", Namespace: "default", Name: "app1"},
 				{Kind: "Service", Namespace: "default", Name: "app1"},
 				{Kind: "ConfigMap", Namespace: "default", Name: "config"},
@@ -103,7 +102,7 @@ func TestResults_FilterByAttributes(t *testing.T) {
 			name:          "filter by ResourceName - app1",
 			filterFunc:    func(r Results) Results { return r.FilterByResourceName("app1") },
 			expectedCount: 2,
-			expectedKeys: []kube.ResourceKey{
+			expectedKeys: []ResourceKey{
 				{Kind: "Deployment", Namespace: "default", Name: "app1"},
 				{Kind: "Service", Namespace: "default", Name: "app1"},
 			},
@@ -112,7 +111,7 @@ func TestResults_FilterByAttributes(t *testing.T) {
 			name:          "chained filters - default namespace Deployments",
 			filterFunc:    func(r Results) Results { return r.FilterByNamespace("default").FilterByKind("Deployment") },
 			expectedCount: 1,
-			expectedKeys:  []kube.ResourceKey{{Kind: "Deployment", Namespace: "default", Name: "app1"}},
+			expectedKeys:  []ResourceKey{{Kind: "Deployment", Namespace: "default", Name: "app1"}},
 		},
 	}
 
@@ -130,44 +129,44 @@ func TestResults_FilterByAttributes(t *testing.T) {
 
 func TestResults_Apply(t *testing.T) {
 	results := Results{
-		kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
-		kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"}:       {Type: Created, Diff: "diff2"},
-		kube.ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Deleted, Diff: "diff3"},
-		kube.ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
+		ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
+		ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"}:       {Type: Created, Diff: "diff2"},
+		ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Deleted, Diff: "diff3"},
+		ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
 	}
 
 	tests := []struct {
 		name          string
-		filterFunc    func(key kube.ResourceKey, result Result) bool
+		filterFunc    func(key ResourceKey, result Result) bool
 		expectedCount int
-		expectedKeys  []kube.ResourceKey
+		expectedKeys  []ResourceKey
 	}{
 		{
 			name: "default namespace with changes",
-			filterFunc: func(key kube.ResourceKey, result Result) bool {
+			filterFunc: func(key ResourceKey, result Result) bool {
 				return key.Namespace == "default" && result.Type != Unchanged
 			},
 			expectedCount: 2,
-			expectedKeys: []kube.ResourceKey{
+			expectedKeys: []ResourceKey{
 				{Kind: "Deployment", Namespace: "default", Name: "app1"},
 				{Kind: "Service", Namespace: "default", Name: "app1"},
 			},
 		},
 		{
 			name: "production namespace resources",
-			filterFunc: func(key kube.ResourceKey, _ Result) bool {
+			filterFunc: func(key ResourceKey, _ Result) bool {
 				return key.Namespace == "production"
 			},
 			expectedCount: 1,
-			expectedKeys:  []kube.ResourceKey{{Kind: "Deployment", Namespace: "production", Name: "app2"}},
+			expectedKeys:  []ResourceKey{{Kind: "Deployment", Namespace: "production", Name: "app2"}},
 		},
 		{
 			name: "only unchanged resources",
-			filterFunc: func(_ kube.ResourceKey, result Result) bool {
+			filterFunc: func(_ ResourceKey, result Result) bool {
 				return result.Type == Unchanged
 			},
 			expectedCount: 1,
-			expectedKeys:  []kube.ResourceKey{{Kind: "ConfigMap", Namespace: "default", Name: "config"}},
+			expectedKeys:  []ResourceKey{{Kind: "ConfigMap", Namespace: "default", Name: "config"}},
 		},
 	}
 
@@ -185,14 +184,14 @@ func TestResults_Apply(t *testing.T) {
 
 func TestResults_Analysis(t *testing.T) {
 	results := Results{
-		kube.ResourceKey{Kind: "Deployment", Name: "changed-app"}:   {Type: Changed, Diff: "changed diff"},
-		kube.ResourceKey{Kind: "Service", Name: "created-service"}:  {Type: Created, Diff: "created diff"},
-		kube.ResourceKey{Kind: "ConfigMap", Name: "deleted-config"}: {Type: Deleted, Diff: "deleted diff"},
-		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
+		ResourceKey{Kind: "Deployment", Name: "changed-app"}:   {Type: Changed, Diff: "changed diff"},
+		ResourceKey{Kind: "Service", Name: "created-service"}:  {Type: Created, Diff: "created diff"},
+		ResourceKey{Kind: "ConfigMap", Name: "deleted-config"}: {Type: Deleted, Diff: "deleted diff"},
+		ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
 	}
 
 	noChangesResults := Results{
-		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}: {Type: Unchanged, Diff: ""},
+		ResourceKey{Kind: "Secret", Name: "unchanged-secret"}: {Type: Unchanged, Diff: ""},
 	}
 
 	emptyResults := Results{}
@@ -288,12 +287,12 @@ func TestResults_GetStatistics(t *testing.T) {
 		{
 			name: "mixed results",
 			results: Results{
-				kube.ResourceKey{Kind: "Deployment", Name: "app1"}:  {Type: Changed, Diff: "diff1"},
-				kube.ResourceKey{Kind: "Deployment", Name: "app2"}:  {Type: Changed, Diff: "diff2"},
-				kube.ResourceKey{Kind: "Service", Name: "svc1"}:     {Type: Created, Diff: "diff3"},
-				kube.ResourceKey{Kind: "ConfigMap", Name: "config"}: {Type: Deleted, Diff: "diff4"},
-				kube.ResourceKey{Kind: "Secret", Name: "secret1"}:   {Type: Unchanged, Diff: ""},
-				kube.ResourceKey{Kind: "Secret", Name: "secret2"}:   {Type: Unchanged, Diff: ""},
+				ResourceKey{Kind: "Deployment", Name: "app1"}:  {Type: Changed, Diff: "diff1"},
+				ResourceKey{Kind: "Deployment", Name: "app2"}:  {Type: Changed, Diff: "diff2"},
+				ResourceKey{Kind: "Service", Name: "svc1"}:     {Type: Created, Diff: "diff3"},
+				ResourceKey{Kind: "ConfigMap", Name: "config"}: {Type: Deleted, Diff: "diff4"},
+				ResourceKey{Kind: "Secret", Name: "secret1"}:   {Type: Unchanged, Diff: ""},
+				ResourceKey{Kind: "Secret", Name: "secret2"}:   {Type: Unchanged, Diff: ""},
 			},
 			expectedTotal:     6,
 			expectedChanged:   2,
@@ -327,15 +326,15 @@ func TestResults_GetStatistics(t *testing.T) {
 
 func TestResults_StringSummary(t *testing.T) {
 	results := Results{
-		kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
-		kube.ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Changed, Diff: "diff2"},
-		kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "svc1"}:       {Type: Created, Diff: "diff3"},
-		kube.ResourceKey{Kind: "ConfigMap", Name: "config1"}:                        {Type: Deleted, Diff: "diff4"}, // cluster-scoped
-		kube.ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}:     {Type: Unchanged, Diff: ""},
+		ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
+		ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Changed, Diff: "diff2"},
+		ResourceKey{Kind: "Service", Namespace: "default", Name: "svc1"}:       {Type: Created, Diff: "diff3"},
+		ResourceKey{Kind: "ConfigMap", Name: "config1"}:                        {Type: Deleted, Diff: "diff4"}, // cluster-scoped
+		ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}:     {Type: Unchanged, Diff: ""},
 	}
 
 	unchangedOnlyResults := Results{
-		kube.ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}: {Type: Unchanged, Diff: ""},
+		ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}: {Type: Unchanged, Diff: ""},
 	}
 
 	emptyResults := Results{}

@@ -4,36 +4,35 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
 )
 
 // GetChangedResourceKeys extracts resources that have any type of change (Created, Changed, Deleted)
 // DEPRECATED: Use Results.Apply() with custom filter or multiple GetResourceKeysByType() calls
-func GetChangedResourceKeys(results Results) []kube.ResourceKey {
-	return results.Apply(func(_ kube.ResourceKey, diffResult Result) bool {
+func GetChangedResourceKeys(results Results) []ResourceKey {
+	return results.Apply(func(_ ResourceKey, diffResult Result) bool {
 		return diffResult.Type != Unchanged
 	}).GetResourceKeys()
 }
 
-// ParseResourceKey parses a string resource key into kube.ResourceKey
-func ParseResourceKey(key string) kube.ResourceKey {
+// ParseResourceKey parses a string resource key into ResourceKey
+func ParseResourceKey(key string) ResourceKey {
 	parts := strings.Split(key, "/")
 	switch len(parts) {
 	case 2: // Kind/Name (cluster-scoped)
-		return kube.ResourceKey{
+		return ResourceKey{
 			Kind: parts[0],
 			Name: parts[1],
 		}
 	case 3: // Kind/Namespace/Name (namespaced)
-		return kube.ResourceKey{
+		return ResourceKey{
 			Kind:      parts[0],
 			Namespace: parts[1],
 			Name:      parts[2],
 		}
 	default:
 		// Fallback - shouldn't happen with well-formed keys
-		return kube.ResourceKey{Name: key}
+		return ResourceKey{Name: key}
 	}
 }
 

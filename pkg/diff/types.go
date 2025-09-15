@@ -3,9 +3,23 @@ package diff
 import (
 	"fmt"
 	"strings"
-
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 )
+
+// ResourceKey uniquely identifies a Kubernetes resource
+type ResourceKey struct {
+	Name      string
+	Namespace string
+	Group     string
+	Kind      string
+}
+
+// String returns a string representation of the ResourceKey
+func (k ResourceKey) String() string {
+	if k.Namespace != "" {
+		return fmt.Sprintf("%s/%s/%s/%s", k.Group, k.Kind, k.Namespace, k.Name)
+	}
+	return fmt.Sprintf("%s/%s/%s", k.Group, k.Kind, k.Name)
+}
 
 // ChangeType represents the type of change for a resource
 type ChangeType int
@@ -49,7 +63,7 @@ func (dr Result) String() string {
 }
 
 // Results represents a collection of diff results for multiple resources
-type Results map[kube.ResourceKey]Result
+type Results map[ResourceKey]Result
 
 // Statistics represents statistics about diff results
 type Statistics struct {
@@ -76,7 +90,7 @@ func (dr Results) StringSummary() string {
 	var result strings.Builder
 
 	// Helper function to format ResourceKey as string
-	formatResourceKey := func(key kube.ResourceKey) string {
+	formatResourceKey := func(key ResourceKey) string {
 		if key.Namespace != "" {
 			return fmt.Sprintf("%s/%s/%s", key.Kind, key.Namespace, key.Name)
 		}
@@ -84,7 +98,7 @@ func (dr Results) StringSummary() string {
 	}
 
 	// Helper function to write a section
-	writeSection := func(title string, keys []kube.ResourceKey) {
+	writeSection := func(title string, keys []ResourceKey) {
 		if len(keys) > 0 {
 			result.WriteString(fmt.Sprintf("%s:\n", title))
 			for _, key := range keys {
@@ -168,7 +182,7 @@ func (dr Results) FilterByResourceName(name string) Results {
 }
 
 // Apply returns a new Results containing only resources that match the filter function
-func (dr Results) Apply(filter func(kube.ResourceKey, Result) bool) Results {
+func (dr Results) Apply(filter func(ResourceKey, Result) bool) Results {
 	result := make(Results)
 	for key, diffResult := range dr {
 		if filter(key, diffResult) {
@@ -210,8 +224,8 @@ func (dr Results) CountByType(changeType ChangeType) int {
 }
 
 // GetResourceKeys returns a slice of all resource keys in the Results
-func (dr Results) GetResourceKeys() []kube.ResourceKey {
-	keys := make([]kube.ResourceKey, 0, len(dr))
+func (dr Results) GetResourceKeys() []ResourceKey {
+	keys := make([]ResourceKey, 0, len(dr))
 	for key := range dr {
 		keys = append(keys, key)
 	}
@@ -219,8 +233,8 @@ func (dr Results) GetResourceKeys() []kube.ResourceKey {
 }
 
 // GetResourceKeysByType returns a slice of resource keys with the specified change type
-func (dr Results) GetResourceKeysByType(changeType ChangeType) []kube.ResourceKey {
-	keys := make([]kube.ResourceKey, 0)
+func (dr Results) GetResourceKeysByType(changeType ChangeType) []ResourceKey {
+	keys := make([]ResourceKey, 0)
 	for key, diffResult := range dr {
 		if diffResult.Type == changeType {
 			keys = append(keys, key)
