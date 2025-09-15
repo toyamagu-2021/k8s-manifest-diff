@@ -88,7 +88,7 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, bo
 		if code > 1 {
 			return "", false, err
 		}
-		header := fmt.Sprintf("\n===== %s/%s %s/%s ======", k.Group, k.Kind, k.Namespace, k.Name)
+		header := fmt.Sprintf("===== %s/%s %s/%s ======\n", k.Group, k.Kind, k.Namespace, k.Name)
 		diff += header + diffStr
 	}
 	return diff, foundDiff, nil
