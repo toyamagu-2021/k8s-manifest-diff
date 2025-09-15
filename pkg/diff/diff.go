@@ -46,6 +46,220 @@ func (ct ChangeType) String() string {
 	}
 }
 
+// Result represents the result of a diff operation for a resource
+type Result struct {
+	Type ChangeType // Type of change (Created, Changed, Deleted, Unchanged)
+	Diff string     // Diff string representation
+}
+
+// String returns the string representation of Result
+func (dr Result) String() string {
+	return dr.Diff
+}
+
+// Results represents a collection of diff results for multiple resources
+type Results map[kube.ResourceKey]Result
+
+// Statistics represents statistics about diff results
+type Statistics struct {
+	Total     int
+	Changed   int
+	Created   int
+	Deleted   int
+	Unchanged int
+}
+
+// StringDiff returns a concatenated string of all diff results
+func (dr Results) StringDiff() string {
+	var result string
+	for _, diffResult := range dr {
+		if diffResult.Diff != "" {
+			result += diffResult.Diff
+		}
+	}
+	return result
+}
+
+// StringSummary returns a summary string organized by change types: Unchanged, Changed, Create, Delete
+func (dr Results) StringSummary() string {
+	var result strings.Builder
+
+	// Helper function to format ResourceKey as string
+	formatResourceKey := func(key kube.ResourceKey) string {
+		if key.Namespace != "" {
+			return fmt.Sprintf("%s/%s/%s", key.Kind, key.Namespace, key.Name)
+		}
+		return fmt.Sprintf("%s/%s", key.Kind, key.Name)
+	}
+
+	// Helper function to write a section
+	writeSection := func(title string, keys []kube.ResourceKey) {
+		if len(keys) > 0 {
+			result.WriteString(fmt.Sprintf("%s:\n", title))
+			for _, key := range keys {
+				result.WriteString(fmt.Sprintf("  %s\n", formatResourceKey(key)))
+			}
+			result.WriteString("\n")
+		}
+	}
+
+	// Use filtering methods to organize resources by change type
+	writeSection("Unchanged", dr.FilterUnchanged().GetResourceKeys())
+	writeSection("Changed", dr.FilterChanged().GetResourceKeys())
+	writeSection("Create", dr.FilterCreated().GetResourceKeys())
+	writeSection("Delete", dr.FilterDeleted().GetResourceKeys())
+
+	return strings.TrimRight(result.String(), "\n")
+}
+
+// FilterByType returns a new Results containing only resources with the specified change type
+func (dr Results) FilterByType(changeType ChangeType) Results {
+	result := make(Results)
+	for key, diffResult := range dr {
+		if diffResult.Type == changeType {
+			result[key] = diffResult
+		}
+	}
+	return result
+}
+
+// FilterChanged returns a new Results containing only changed resources
+func (dr Results) FilterChanged() Results {
+	return dr.FilterByType(Changed)
+}
+
+// FilterCreated returns a new Results containing only created resources
+func (dr Results) FilterCreated() Results {
+	return dr.FilterByType(Created)
+}
+
+// FilterDeleted returns a new Results containing only deleted resources
+func (dr Results) FilterDeleted() Results {
+	return dr.FilterByType(Deleted)
+}
+
+// FilterUnchanged returns a new Results containing only unchanged resources
+func (dr Results) FilterUnchanged() Results {
+	return dr.FilterByType(Unchanged)
+}
+
+// FilterByKind returns a new Results containing only resources with the specified kind
+func (dr Results) FilterByKind(kind string) Results {
+	result := make(Results)
+	for key, diffResult := range dr {
+		if key.Kind == kind {
+			result[key] = diffResult
+		}
+	}
+	return result
+}
+
+// FilterByNamespace returns a new Results containing only resources with the specified namespace
+func (dr Results) FilterByNamespace(namespace string) Results {
+	result := make(Results)
+	for key, diffResult := range dr {
+		if key.Namespace == namespace {
+			result[key] = diffResult
+		}
+	}
+	return result
+}
+
+// FilterByResourceName returns a new Results containing only resources with the specified name
+func (dr Results) FilterByResourceName(name string) Results {
+	result := make(Results)
+	for key, diffResult := range dr {
+		if key.Name == name {
+			result[key] = diffResult
+		}
+	}
+	return result
+}
+
+// Apply returns a new Results containing only resources that match the filter function
+func (dr Results) Apply(filter func(kube.ResourceKey, Result) bool) Results {
+	result := make(Results)
+	for key, diffResult := range dr {
+		if filter(key, diffResult) {
+			result[key] = diffResult
+		}
+	}
+	return result
+}
+
+// HasChanges returns true if there are any changes (Created, Changed, or Deleted resources)
+func (dr Results) HasChanges() bool {
+	for _, diffResult := range dr {
+		if diffResult.Type != Unchanged {
+			return true
+		}
+	}
+	return false
+}
+
+// IsEmpty returns true if the Results contains no resources
+func (dr Results) IsEmpty() bool {
+	return len(dr) == 0
+}
+
+// Count returns the total number of resources in the Results
+func (dr Results) Count() int {
+	return len(dr)
+}
+
+// CountByType returns the number of resources with the specified change type
+func (dr Results) CountByType(changeType ChangeType) int {
+	count := 0
+	for _, diffResult := range dr {
+		if diffResult.Type == changeType {
+			count++
+		}
+	}
+	return count
+}
+
+// GetResourceKeys returns a slice of all resource keys in the Results
+func (dr Results) GetResourceKeys() []kube.ResourceKey {
+	keys := make([]kube.ResourceKey, 0, len(dr))
+	for key := range dr {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// GetResourceKeysByType returns a slice of resource keys with the specified change type
+func (dr Results) GetResourceKeysByType(changeType ChangeType) []kube.ResourceKey {
+	keys := make([]kube.ResourceKey, 0)
+	for key, diffResult := range dr {
+		if diffResult.Type == changeType {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// GetStatistics returns statistics about the diff results
+func (dr Results) GetStatistics() Statistics {
+	stats := Statistics{
+		Total: len(dr),
+	}
+
+	for _, diffResult := range dr {
+		switch diffResult.Type {
+		case Changed:
+			stats.Changed++
+		case Created:
+			stats.Created++
+		case Deleted:
+			stats.Deleted++
+		case Unchanged:
+			stats.Unchanged++
+		}
+	}
+
+	return stats
+}
+
 // Options controls the diff behavior
 type Options struct {
 	ExcludeKinds       []string          // List of Kinds to exclude from diff
@@ -72,32 +286,32 @@ type objBaseHead struct {
 }
 
 // YamlString compares two YAML strings and returns the diff
-// Returns: (diff string, resource changes map[kube.ResourceKey]ChangeType, has differences bool, error)
-func YamlString(baseYaml, headYaml string, opts *Options) (string, map[kube.ResourceKey]ChangeType, bool, error) {
+// Returns: Results, bool (has differences), error
+func YamlString(baseYaml, headYaml string, opts *Options) (Results, bool, error) {
 	baseReader := strings.NewReader(baseYaml)
 	headReader := strings.NewReader(headYaml)
 	return Yaml(baseReader, headReader, opts)
 }
 
 // Yaml compares YAML from two io.Reader sources and returns the diff
-// Returns: (diff string, resource changes map[kube.ResourceKey]ChangeType, has differences bool, error)
-func Yaml(baseReader, headReader io.Reader, opts *Options) (string, map[kube.ResourceKey]ChangeType, bool, error) {
+// Returns: Results, bool (has differences), error
+func Yaml(baseReader, headReader io.Reader, opts *Options) (Results, bool, error) {
 	baseObjects, err := parser.ParseYAML(baseReader)
 	if err != nil {
-		return "", nil, false, fmt.Errorf("failed to parse base YAML: %w", err)
+		return nil, false, fmt.Errorf("failed to parse base YAML: %w", err)
 	}
 
 	headObjects, err := parser.ParseYAML(headReader)
 	if err != nil {
-		return "", nil, false, fmt.Errorf("failed to parse head YAML: %w", err)
+		return nil, false, fmt.Errorf("failed to parse head YAML: %w", err)
 	}
 
 	return Objects(baseObjects, headObjects, opts)
 }
 
 // Objects compares two sets of Kubernetes objects and returns the diff
-// Returns: (diff string, resource changes map[kube.ResourceKey]ChangeType, has differences bool, error)
-func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, map[kube.ResourceKey]ChangeType, bool, error) {
+// Returns: Results, bool (has differences), error
+func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, bool, error) {
 	if opts == nil {
 		opts = DefaultOptions()
 	}
@@ -105,26 +319,30 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, ma
 	base = FilterResources(base, opts)
 	head = FilterResources(head, opts)
 	objMap := parseObjsToMap(base, head)
+	results := make(Results)
 	foundDiff := false
-	diff := ""
-	resourceChanges := make(map[kube.ResourceKey]ChangeType)
 
 	for k, v := range objMap {
 		changeType := determineChangeType(v.base, v.head)
-		resourceChanges[k] = changeType
 
+		var diffStr string
 		// Generate diff output only for resources that need it
 		if needsDiff := requiresDiffOutput(changeType); needsDiff {
 			foundDiff = true
-			diffStr, code, err := getDiffStr(k.Name, v.head, v.base, opts)
+			diffOutput, code, err := getDiffStr(k.Name, v.head, v.base, opts)
 			if code > 1 {
-				return "", nil, false, err
+				return nil, false, err
 			}
 			header := fmt.Sprintf("===== %s/%s %s/%s ======\n", k.Group, k.Kind, k.Namespace, k.Name)
-			diff += header + diffStr
+			diffStr = header + diffOutput
+		}
+
+		results[k] = Result{
+			Type: changeType,
+			Diff: diffStr,
 		}
 	}
-	return diff, resourceChanges, foundDiff, nil
+	return results, foundDiff, nil
 }
 
 // determineChangeType determines the type of change between base and head objects

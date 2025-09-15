@@ -10,23 +10,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// getResourcesWithChangeType extracts resources with specific change types from the resource changes map
-func getResourcesWithChangeType(resourceChanges map[kube.ResourceKey]ChangeType, changeTypes ...ChangeType) []kube.ResourceKey {
-	var result []kube.ResourceKey
-	for resource, changeType := range resourceChanges {
-		for _, ct := range changeTypes {
-			if changeType == ct {
-				result = append(result, resource)
-				break
-			}
-		}
-	}
-	return result
-}
-
 // getChangedResources extracts resources that have any type of change (Created, Changed, Deleted)
-func getChangedResources(resourceChanges map[kube.ResourceKey]ChangeType) []kube.ResourceKey {
-	return getResourcesWithChangeType(resourceChanges, Created, Changed, Deleted)
+// DEPRECATED: Use Results.Apply() with custom filter or multiple GetResourceKeysByType() calls
+func getChangedResources(results Results) []kube.ResourceKey {
+	return results.Apply(func(_ kube.ResourceKey, diffResult Result) bool {
+		return diffResult.Type != Unchanged
+	}).GetResourceKeys()
 }
 
 // parseResourceKey parses a string resource key into kube.ResourceKey
@@ -51,14 +40,202 @@ func parseResourceKey(key string) kube.ResourceKey {
 }
 
 // assertResourceChange checks if a specific resource has the expected change type
-func assertResourceChange(t *testing.T, resourceChanges map[kube.ResourceKey]ChangeType, expectedKey string, expectedChangeType ChangeType) {
+func assertResourceChange(t *testing.T, results Results, expectedKey string, expectedChangeType ChangeType) {
 	expectedResourceKey := parseResourceKey(expectedKey)
-	changeType, found := resourceChanges[expectedResourceKey]
+	result, found := results[expectedResourceKey]
 	if found {
-		assert.Equal(t, expectedChangeType, changeType, "Expected change type %s for resource %s, got %s", expectedChangeType.String(), expectedKey, changeType.String())
+		assert.Equal(t, expectedChangeType, result.Type, "Expected change type %s for resource %s, got %s", expectedChangeType.String(), expectedKey, result.Type.String())
 	} else {
-		assert.True(t, found, "Resource %s not found in resource changes", expectedKey)
+		assert.True(t, found, "Resource %s not found in results", expectedKey)
 	}
+}
+
+func TestResults_FilterByType(t *testing.T) {
+	// Create test results with various change types
+	results := Results{
+		kube.ResourceKey{Kind: "Deployment", Name: "changed-app"}:   {Type: Changed, Diff: "changed diff"},
+		kube.ResourceKey{Kind: "Service", Name: "created-service"}:  {Type: Created, Diff: "created diff"},
+		kube.ResourceKey{Kind: "ConfigMap", Name: "deleted-config"}: {Type: Deleted, Diff: "deleted diff"},
+		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
+	}
+
+	// Test FilterByType
+	changedResults := results.FilterByType(Changed)
+	assert.Equal(t, 1, len(changedResults))
+	assert.Contains(t, changedResults, kube.ResourceKey{Kind: "Deployment", Name: "changed-app"})
+
+	createdResults := results.FilterByType(Created)
+	assert.Equal(t, 1, len(createdResults))
+	assert.Contains(t, createdResults, kube.ResourceKey{Kind: "Service", Name: "created-service"})
+
+	// Test convenience methods
+	assert.Equal(t, changedResults, results.FilterChanged())
+	assert.Equal(t, createdResults, results.FilterCreated())
+	assert.Equal(t, results.FilterByType(Deleted), results.FilterDeleted())
+	assert.Equal(t, results.FilterByType(Unchanged), results.FilterUnchanged())
+}
+
+func TestResults_FilterByAttributes(t *testing.T) {
+	results := Results{
+		kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
+		kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"}:       {Type: Created, Diff: "diff2"},
+		kube.ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Deleted, Diff: "diff3"},
+		kube.ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
+	}
+
+	// Test FilterByKind
+	deployments := results.FilterByKind("Deployment")
+	assert.Equal(t, 2, len(deployments))
+
+	// Test FilterByNamespace
+	defaultNS := results.FilterByNamespace("default")
+	assert.Equal(t, 3, len(defaultNS))
+
+	// Test FilterByResourceName
+	app1Resources := results.FilterByResourceName("app1")
+	assert.Equal(t, 2, len(app1Resources))
+
+	// Test chaining filters
+	defaultDeployments := results.FilterByNamespace("default").FilterByKind("Deployment")
+	assert.Equal(t, 1, len(defaultDeployments))
+	assert.Contains(t, defaultDeployments, kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"})
+}
+
+func TestResults_Apply(t *testing.T) {
+	results := Results{
+		kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
+		kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"}:       {Type: Created, Diff: "diff2"},
+		kube.ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Deleted, Diff: "diff3"},
+		kube.ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
+	}
+
+	// Filter resources in default namespace that have changes
+	filtered := results.Apply(func(key kube.ResourceKey, result Result) bool {
+		return key.Namespace == "default" && result.Type != Unchanged
+	})
+
+	assert.Equal(t, 2, len(filtered))
+	assert.Contains(t, filtered, kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"})
+	assert.Contains(t, filtered, kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"})
+}
+
+func TestResults_Analysis(t *testing.T) {
+	results := Results{
+		kube.ResourceKey{Kind: "Deployment", Name: "changed-app"}:   {Type: Changed, Diff: "changed diff"},
+		kube.ResourceKey{Kind: "Service", Name: "created-service"}:  {Type: Created, Diff: "created diff"},
+		kube.ResourceKey{Kind: "ConfigMap", Name: "deleted-config"}: {Type: Deleted, Diff: "deleted diff"},
+		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
+	}
+
+	// Test HasChanges
+	assert.True(t, results.HasChanges())
+
+	noChangesResults := Results{
+		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}: {Type: Unchanged, Diff: ""},
+	}
+	assert.False(t, noChangesResults.HasChanges())
+
+	// Test IsEmpty
+	assert.False(t, results.IsEmpty())
+	emptyResults := Results{}
+	assert.True(t, emptyResults.IsEmpty())
+
+	// Test Count
+	assert.Equal(t, 4, results.Count())
+	assert.Equal(t, 0, emptyResults.Count())
+
+	// Test CountByType
+	assert.Equal(t, 1, results.CountByType(Changed))
+	assert.Equal(t, 1, results.CountByType(Created))
+	assert.Equal(t, 1, results.CountByType(Deleted))
+	assert.Equal(t, 1, results.CountByType(Unchanged))
+	assert.Equal(t, 0, results.CountByType(ChangeType(99))) // Invalid type
+
+	// Test GetResourceKeys
+	keys := results.GetResourceKeys()
+	assert.Equal(t, 4, len(keys))
+
+	// Test GetResourceKeysByType
+	changedKeys := results.GetResourceKeysByType(Changed)
+	assert.Equal(t, 1, len(changedKeys))
+	assert.Equal(t, "changed-app", changedKeys[0].Name)
+
+	createdKeys := results.GetResourceKeysByType(Created)
+	assert.Equal(t, 1, len(createdKeys))
+	assert.Equal(t, "created-service", createdKeys[0].Name)
+}
+
+func TestResults_GetStatistics(t *testing.T) {
+	results := Results{
+		kube.ResourceKey{Kind: "Deployment", Name: "app1"}:  {Type: Changed, Diff: "diff1"},
+		kube.ResourceKey{Kind: "Deployment", Name: "app2"}:  {Type: Changed, Diff: "diff2"},
+		kube.ResourceKey{Kind: "Service", Name: "svc1"}:     {Type: Created, Diff: "diff3"},
+		kube.ResourceKey{Kind: "ConfigMap", Name: "config"}: {Type: Deleted, Diff: "diff4"},
+		kube.ResourceKey{Kind: "Secret", Name: "secret1"}:   {Type: Unchanged, Diff: ""},
+		kube.ResourceKey{Kind: "Secret", Name: "secret2"}:   {Type: Unchanged, Diff: ""},
+	}
+
+	stats := results.GetStatistics()
+
+	assert.Equal(t, 6, stats.Total)
+	assert.Equal(t, 2, stats.Changed)
+	assert.Equal(t, 1, stats.Created)
+	assert.Equal(t, 1, stats.Deleted)
+	assert.Equal(t, 2, stats.Unchanged)
+
+	// Test with empty results
+	emptyResults := Results{}
+	emptyStats := emptyResults.GetStatistics()
+	assert.Equal(t, 0, emptyStats.Total)
+	assert.Equal(t, 0, emptyStats.Changed)
+	assert.Equal(t, 0, emptyStats.Created)
+	assert.Equal(t, 0, emptyStats.Deleted)
+	assert.Equal(t, 0, emptyStats.Unchanged)
+}
+
+func TestResults_StringSummary(t *testing.T) {
+	results := Results{
+		kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
+		kube.ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Changed, Diff: "diff2"},
+		kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "svc1"}:       {Type: Created, Diff: "diff3"},
+		kube.ResourceKey{Kind: "ConfigMap", Name: "config1"}:                        {Type: Deleted, Diff: "diff4"}, // cluster-scoped
+		kube.ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}:     {Type: Unchanged, Diff: ""},
+	}
+
+	summary := results.StringSummary()
+
+	// Verify the summary contains all sections
+	assert.Contains(t, summary, "Unchanged:")
+	assert.Contains(t, summary, "Changed:")
+	assert.Contains(t, summary, "Create:")
+	assert.Contains(t, summary, "Delete:")
+
+	// Verify correct formatting for namespaced resources
+	assert.Contains(t, summary, "Deployment/default/app1")
+	assert.Contains(t, summary, "Deployment/production/app2")
+	assert.Contains(t, summary, "Service/default/svc1")
+	assert.Contains(t, summary, "Secret/default/secret1")
+
+	// Verify correct formatting for cluster-scoped resources (no namespace)
+	assert.Contains(t, summary, "ConfigMap/config1")
+	// Should not contain ConfigMap with namespace
+	assert.NotContains(t, summary, "ConfigMap//config1")
+
+	// Test with empty results
+	emptyResults := Results{}
+	emptySummary := emptyResults.StringSummary()
+	assert.Equal(t, "", emptySummary)
+
+	// Test with only unchanged resources
+	unchangedOnly := Results{
+		kube.ResourceKey{Kind: "Secret", Name: "secret1"}: {Type: Unchanged, Diff: ""},
+	}
+	unchangedSummary := unchangedOnly.StringSummary()
+	assert.Contains(t, unchangedSummary, "Unchanged:")
+	assert.Contains(t, unchangedSummary, "Secret/secret1")
+	assert.NotContains(t, unchangedSummary, "Changed:")
+	assert.NotContains(t, unchangedSummary, "Create:")
+	assert.NotContains(t, unchangedSummary, "Delete:")
 }
 
 func TestLabelSelectorFiltering(t *testing.T) {
@@ -330,18 +507,21 @@ func TestObjectsWithLabelSelector(t *testing.T) {
 			Context: 3,
 		}
 
-		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
+		results, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "ConfigMap")
 		assert.Contains(t, diffResult, "old-value")
 		assert.Contains(t, diffResult, "new-value")
 		assert.NotContains(t, diffResult, "excluded-config")
 
 		// Check changed resources list
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "ConfigMap/default/config", Changed)
+		assertResourceChange(t, results, "ConfigMap/default/config", Changed)
 	})
 
 	t.Run("diff with non-matching label selector", func(t *testing.T) {
@@ -352,11 +532,14 @@ func TestObjectsWithLabelSelector(t *testing.T) {
 			Context: 3,
 		}
 
-		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
+		results, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
-		assert.Equal(t, 0, len(changedResources))
+		assert.Equal(t, 0, len(results))
 	})
 }
 
@@ -384,41 +567,48 @@ data:
 `
 
 	t.Run("diff with changes", func(t *testing.T) {
-		diffResult, changedResources, hasDiff, err := YamlString(baseYaml, headYaml, nil)
+		results, hasDiff, err := YamlString(baseYaml, headYaml, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "ConfigMap")
 		assert.Contains(t, diffResult, "old-value")
 		assert.Contains(t, diffResult, "new-value")
 
 		// Check changed resources list
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "ConfigMap/default/test-config", Changed)
+		assertResourceChange(t, results, "ConfigMap/default/test-config", Changed)
 	})
 
 	t.Run("no diff when identical", func(t *testing.T) {
-		diffResult, resourceChanges, hasDiff, err := YamlString(baseYaml, baseYaml, nil)
+		results, hasDiff, err := YamlString(baseYaml, baseYaml, nil)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
+
 		// The resource should exist but be unchanged
-		changedResourcesList := getChangedResources(resourceChanges)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 0, len(changedResourcesList))
 		// Check that the resource exists as unchanged
-		assertResourceChange(t, resourceChanges, "ConfigMap/default/test-config", Unchanged)
+		assertResourceChange(t, results, "ConfigMap/default/test-config", Unchanged)
 	})
 
 	t.Run("error on invalid base yaml", func(t *testing.T) {
 		invalidYaml := `invalid: yaml: structure`
-		_, _, _, err := YamlString(invalidYaml, headYaml, nil)
+		_, _, err := YamlString(invalidYaml, headYaml, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse base YAML")
 	})
 
 	t.Run("error on invalid head yaml", func(t *testing.T) {
 		invalidYaml := `invalid: yaml: structure`
-		_, _, _, err := YamlString(baseYaml, invalidYaml, nil)
+		_, _, err := YamlString(baseYaml, invalidYaml, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse head YAML")
 	})
@@ -453,32 +643,38 @@ spec:
 		baseReader := strings.NewReader(baseYaml)
 		headReader := strings.NewReader(headYaml)
 
-		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
+		results, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "Pod")
 		assert.Contains(t, diffResult, "nginx:1.20")
 		assert.Contains(t, diffResult, "nginx:1.21")
 
 		// Check changed resources list
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "Pod/default/test-pod", Changed)
+		assertResourceChange(t, results, "Pod/default/test-pod", Changed)
 	})
 
 	t.Run("no diff when identical", func(t *testing.T) {
 		baseReader := strings.NewReader(baseYaml)
 		headReader := strings.NewReader(baseYaml)
 
-		diffResult, resourceChanges, hasDiff, err := Yaml(baseReader, headReader, nil)
+		results, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
+
 		// The resource should exist but be unchanged
-		changedResourcesList := getChangedResources(resourceChanges)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 0, len(changedResourcesList))
 		// Check that the resource exists as unchanged
-		assertResourceChange(t, resourceChanges, "Pod/default/test-pod", Unchanged)
+		assertResourceChange(t, results, "Pod/default/test-pod", Unchanged)
 	})
 
 	t.Run("multiple objects in yaml", func(t *testing.T) {
@@ -517,33 +713,37 @@ data:
 		baseReader := strings.NewReader(multiYamlBase)
 		headReader := strings.NewReader(multiYamlHead)
 
-		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
+		results, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "config2")
 		assert.Contains(t, diffResult, "value2")
 		assert.Contains(t, diffResult, "updated-value2")
 		assert.NotContains(t, diffResult, "config1")
 
 		// Check changed resources list - only config2 should be changed
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "ConfigMap/config2", Changed)
+		assertResourceChange(t, results, "ConfigMap/config2", Changed)
 	})
 
 	t.Run("empty yaml", func(t *testing.T) {
 		baseReader := strings.NewReader("")
 		headReader := strings.NewReader(headYaml)
 
-		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
+		results, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "test-pod")
 
 		// Check changed resources list - new resource added
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "Pod/default/test-pod", Created)
+		assertResourceChange(t, results, "Pod/default/test-pod", Created)
 	})
 }
 
@@ -584,10 +784,12 @@ func TestSecretMasking(t *testing.T) {
 
 	t.Run("masks secret values by default", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, changedResources, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "test-secret")
 
 		// Should not contain actual values
@@ -599,17 +801,20 @@ func TestSecretMasking(t *testing.T) {
 		assert.Contains(t, diffResult, "++++++++++++++++")
 
 		// Check changed resources list
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "Secret/default/test-secret", Changed)
+		assertResourceChange(t, results, "Secret/default/test-secret", Changed)
 	})
 
 	t.Run("same values get same mask, different values get different masks", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 
 		// Count occurrences of different mask lengths
 		base16Plus := strings.Count(diffResult, "++++++++++++++++")  // 16 +
@@ -624,11 +829,13 @@ func TestSecretMasking(t *testing.T) {
 			DisableMaskSecrets: true,
 			Context:            3,
 		}
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 
+		// Check diff string output
+		diffResult := results.StringDiff()
 		// Should contain actual values when masking is disabled
 		assert.Contains(t, diffResult, "cGFzc3dvcmQxMjM=")
 		assert.Contains(t, diffResult, "bmV3cGFzc3dvcmQ=")
@@ -652,10 +859,13 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithStringData}, []*unstructured.Unstructured{secretWithStringData}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithStringData}, []*unstructured.Unstructured{secretWithStringData}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff) // Same object should not have diff
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
 	})
 
@@ -675,10 +885,13 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{configMap}, []*unstructured.Unstructured{configMap}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{configMap}, []*unstructured.Unstructured{configMap}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
 	})
 
@@ -715,10 +928,13 @@ func TestSecretMasking(t *testing.T) {
 		baseObjects := []*unstructured.Unstructured{baseSecret, configMapBase}
 		headObjects := []*unstructured.Unstructured{headSecret, configMapHead}
 
-		diffResult, _, hasDiff, err := Objects(baseObjects, headObjects, opts)
+		results, hasDiff, err := Objects(baseObjects, headObjects, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 
 		// Secret values should be masked
 		assert.NotContains(t, diffResult, "cGFzc3dvcmQxMjM=")
@@ -743,10 +959,13 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{emptySecret}, []*unstructured.Unstructured{emptySecret}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{emptySecret}, []*unstructured.Unstructured{emptySecret}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
 	})
 
@@ -768,10 +987,13 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNil}, []*unstructured.Unstructured{secretWithNil}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNil}, []*unstructured.Unstructured{secretWithNil}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
 	})
 
@@ -813,10 +1035,13 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{mixedSecretBase}, []*unstructured.Unstructured{mixedSecretHead}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{mixedSecretBase}, []*unstructured.Unstructured{mixedSecretHead}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 
 		// Both data and stringData values should be masked
 		assert.NotContains(t, diffResult, "ZW5jb2RlZC12YWx1ZQ==")
@@ -864,12 +1089,16 @@ func TestSecretMasking(t *testing.T) {
 		opts := DefaultOptions()
 
 		// First diff operation
-		diff1, _, _, err1 := Objects([]*unstructured.Unstructured{secret1}, []*unstructured.Unstructured{secret1}, opts)
+		results1, _, err1 := Objects([]*unstructured.Unstructured{secret1}, []*unstructured.Unstructured{secret1}, opts)
 		assert.NoError(t, err1)
 
 		// Second diff operation with same value
-		diff2, _, _, err2 := Objects([]*unstructured.Unstructured{secret2}, []*unstructured.Unstructured{secret2}, opts)
+		results2, _, err2 := Objects([]*unstructured.Unstructured{secret2}, []*unstructured.Unstructured{secret2}, opts)
 		assert.NoError(t, err2)
+
+		// Check diff string output for both
+		diff1 := results1.StringDiff()
+		diff2 := results2.StringDiff()
 
 		// The same value should get the same mask across different operations
 		// (This test verifies the global state consistency)
@@ -920,10 +1149,13 @@ data:
 
 	t.Run("yaml diff with secret masking enabled", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := YamlString(baseYAML, headYAML, opts)
+		results, hasDiff, err := YamlString(baseYAML, headYAML, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 
 		// Secret values should be masked
 		assert.NotContains(t, diffResult, "cGFzc3dvcmQxMjM=")
@@ -942,10 +1174,13 @@ data:
 			DisableMaskSecrets: true,
 			Context:            3,
 		}
-		diffResult, _, hasDiff, err := YamlString(baseYAML, headYAML, opts)
+		results, hasDiff, err := YamlString(baseYAML, headYAML, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 
 		// Secret values should not be masked
 		assert.Contains(t, diffResult, "cGFzc3dvcmQxMjM=")
@@ -978,10 +1213,13 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNonString}, []*unstructured.Unstructured{secretWithNonString}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNonString}, []*unstructured.Unstructured{secretWithNonString}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff) // Same object should not have diff
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
 	})
 
@@ -999,10 +1237,13 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithoutData}, []*unstructured.Unstructured{secretWithoutData}, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithoutData}, []*unstructured.Unstructured{secretWithoutData}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
 	})
 
@@ -1028,9 +1269,12 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 		baseObjects := []*unstructured.Unstructured{nil, nonNilSecret}
 		headObjects := []*unstructured.Unstructured{nonNilSecret}
 
-		diffResult, _, hasDiff, err := Objects(baseObjects, headObjects, opts)
+		results, hasDiff, err := Objects(baseObjects, headObjects, opts)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff) // Should not have diff since the non-nil objects are the same
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
 	})
 
@@ -1083,63 +1327,75 @@ func TestObjects(t *testing.T) {
 		head := []*unstructured.Unstructured{&obj}
 		base := []*unstructured.Unstructured{&obj}
 		opts := DefaultOptions()
-		diffResult, resourceChanges, hasDiff, err := Objects(base, head, opts)
+		results, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.Equal(t, "", diffResult)
+
 		// The resource should exist but be unchanged
-		changedResourcesList := getChangedResources(resourceChanges)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 0, len(changedResourcesList))
 		// Check that the resource exists as unchanged
-		assertResourceChange(t, resourceChanges, "Pod/namespace/test", Unchanged)
+		assertResourceChange(t, results, "Pod/namespace/test", Unchanged)
 	})
 
 	t.Run("exists only head", func(t *testing.T) {
 		head := []*unstructured.Unstructured{&obj}
 		base := []*unstructured.Unstructured{}
 		opts := DefaultOptions()
-		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
+		results, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		fmt.Print(diffResult)
 		assert.True(t, strings.Contains(diffResult, "===== /Pod namespace/test ======"))
 		assert.True(t, strings.Contains(diffResult, "apiVersion: v1"))
 		assert.True(t, strings.Contains(diffResult, "kind: Pod"))
 
 		// Check changed resources list - new resource added
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "Pod/namespace/test", Created)
+		assertResourceChange(t, results, "Pod/namespace/test", Created)
 	})
 
 	t.Run("exists only base", func(t *testing.T) {
 		head := []*unstructured.Unstructured{}
 		base := []*unstructured.Unstructured{&obj}
 		opts := DefaultOptions()
-		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
+		results, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		// Check diff string output
+		diffResult := results.StringDiff()
 		assert.True(t, strings.Contains(diffResult, "===== /Pod namespace/test ======"))
 
 		// Check changed resources list - resource deleted
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "Pod/namespace/test", Deleted)
+		assertResourceChange(t, results, "Pod/namespace/test", Deleted)
 	})
 
 	t.Run("workflow excluded by default", func(t *testing.T) {
 		head := []*unstructured.Unstructured{&obj}
 		base := []*unstructured.Unstructured{}
 		opts := DefaultOptions()
-		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
+		results, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "Pod")
 
 		// Check changed resources list
-		changedResourcesList := getChangedResources(changedResources)
+		changedResourcesList := getChangedResources(results)
 		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, changedResources, "Pod/namespace/test", Created)
+		assertResourceChange(t, results, "Pod/namespace/test", Created)
 	})
 }
 
@@ -1193,9 +1449,10 @@ func TestDiffOptionsFiltering(t *testing.T) {
 
 	t.Run("default options include all objects", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "ConfigMap")
 		assert.Contains(t, diffResult, "Secret")
 		assert.Contains(t, diffResult, "Workflow")
@@ -1206,9 +1463,10 @@ func TestDiffOptionsFiltering(t *testing.T) {
 		opts := &Options{
 			ExcludeKinds: []string{},
 		}
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+		diffResult := results.StringDiff()
 		assert.Contains(t, diffResult, "ConfigMap")
 		assert.Contains(t, diffResult, "Secret")
 		assert.Contains(t, diffResult, "Workflow")
@@ -1219,9 +1477,10 @@ func TestDiffOptionsFiltering(t *testing.T) {
 		opts := &Options{
 			ExcludeKinds: []string{"ConfigMap", "Secret"},
 		}
-		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
+		results, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
+		diffResult := results.StringDiff()
 		assert.NotContains(t, diffResult, "ConfigMap")
 		assert.NotContains(t, diffResult, "Secret")
 		assert.Contains(t, diffResult, "Workflow")
@@ -1296,13 +1555,16 @@ func TestObjectsWithNilOptions(t *testing.T) {
 	head := []*unstructured.Unstructured{&obj}
 	base := []*unstructured.Unstructured{}
 
-	diffResult, changedResources, hasDiff, err := Objects(base, head, nil)
+	results, hasDiff, err := Objects(base, head, nil)
 	assert.NoError(t, err)
 	assert.True(t, hasDiff)
+
+	// Check diff string output
+	diffResult := results.StringDiff()
 	assert.Contains(t, diffResult, "ConfigMap")
 
 	// Check changed resources list
-	changedResourcesList := getChangedResources(changedResources)
+	changedResourcesList := getChangedResources(results)
 	assert.Equal(t, 1, len(changedResourcesList))
-	assertResourceChange(t, changedResources, "ConfigMap/test/config", Created)
+	assertResourceChange(t, results, "ConfigMap/test/config", Created)
 }
