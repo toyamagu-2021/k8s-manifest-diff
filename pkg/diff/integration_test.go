@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestObjectsWithLabelSelector(t *testing.T) {
+func TestObjects_LabelSelector(t *testing.T) {
 	podWithLabel := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
@@ -37,36 +37,62 @@ func TestObjectsWithLabelSelector(t *testing.T) {
 	headObjects := []*unstructured.Unstructured{podWithLabel, podWithoutLabel}
 	baseObjects := []*unstructured.Unstructured{}
 
-	t.Run("diff with matching label selector", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{
-				"app": "nginx",
-			},
-		}
-		results, err := Objects(baseObjects, headObjects, opts)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
+	tests := []struct {
+		name                   string
+		labelSelector          map[string]string
+		expectChanges          bool
+		expectedCount          int
+		expectedResourceKey    string
+		expectedChangeType     ChangeType
+		shouldContainInDiff    []string
+		shouldNotContainInDiff []string
+	}{
+		{
+			name:                   "diff with matching label selector",
+			labelSelector:          map[string]string{"app": "nginx"},
+			expectChanges:          true,
+			expectedCount:          1,
+			expectedResourceKey:    "Pod/default/labeled-pod",
+			expectedChangeType:     Created,
+			shouldContainInDiff:    []string{"labeled-pod"},
+			shouldNotContainInDiff: []string{"unlabeled-pod"},
+		},
+		{
+			name:                   "diff with non-matching label selector",
+			labelSelector:          map[string]string{"app": "nonexistent"},
+			expectChanges:          false,
+			expectedCount:          0,
+			expectedResourceKey:    "",
+			expectedChangeType:     Unchanged,
+			shouldContainInDiff:    []string{},
+			shouldNotContainInDiff: []string{"labeled-pod", "unlabeled-pod"},
+		},
+	}
 
-		// Only the labeled pod should be in results
-		assert.Equal(t, 1, results.Count())
-		assertResourceChange(t, results, "Pod/default/labeled-pod", Created)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &Options{
+				LabelSelector: tt.labelSelector,
+			}
+			results, err := Objects(baseObjects, headObjects, opts)
 
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "labeled-pod")
-		assert.NotContains(t, diffResult, "unlabeled-pod")
-	})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectChanges, results.HasChanges())
+			assert.Equal(t, tt.expectedCount, results.Count())
 
-	t.Run("diff with non-matching label selector", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{
-				"app": "nonexistent",
-			},
-		}
-		results, err := Objects(baseObjects, headObjects, opts)
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-		assert.Equal(t, 0, results.Count())
-	})
+			if tt.expectedResourceKey != "" {
+				AssertResourceChange(t, results, tt.expectedResourceKey, tt.expectedChangeType)
+			}
+
+			diffResult := results.StringDiff()
+			for _, expected := range tt.shouldContainInDiff {
+				assert.Contains(t, diffResult, expected)
+			}
+			for _, notExpected := range tt.shouldNotContainInDiff {
+				assert.NotContains(t, diffResult, notExpected)
+			}
+		})
+	}
 }
 
 func TestYamlString(t *testing.T) {
@@ -92,52 +118,101 @@ data:
   key2: new-value
 `
 
-	t.Run("diff with changes", func(t *testing.T) {
-		results, err := YamlString(baseYaml, headYaml, nil)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
+	tests := []struct {
+		name                   string
+		baseYaml               string
+		headYaml               string
+		options                *Options
+		expectChanges          bool
+		expectedCount          int
+		expectedResourceKey    string
+		expectedChangeType     ChangeType
+		shouldContainInDiff    []string
+		shouldNotContainInDiff []string
+		expectError            bool
+		expectedErrorMessage   string
+		expectEmptyDiff        bool
+	}{
+		{
+			name:                   "diff with changes",
+			baseYaml:               baseYaml,
+			headYaml:               headYaml,
+			options:                nil,
+			expectChanges:          true,
+			expectedCount:          1,
+			expectedResourceKey:    "ConfigMap/default/test-config",
+			expectedChangeType:     Changed,
+			shouldContainInDiff:    []string{"ConfigMap", "old-value", "new-value"},
+			shouldNotContainInDiff: []string{},
+		},
+		{
+			name:                "no diff when identical",
+			baseYaml:            baseYaml,
+			headYaml:            baseYaml,
+			options:             nil,
+			expectChanges:       false,
+			expectedCount:       1,
+			expectedResourceKey: "ConfigMap/default/test-config",
+			expectedChangeType:  Unchanged,
+			expectEmptyDiff:     true,
+		},
+		{
+			name:                 "error on invalid base yaml",
+			baseYaml:             `invalid: yaml: structure`,
+			headYaml:             headYaml,
+			options:              nil,
+			expectError:          true,
+			expectedErrorMessage: "failed to parse base YAML",
+		},
+		{
+			name:                 "error on invalid head yaml",
+			baseYaml:             baseYaml,
+			headYaml:             `invalid: yaml: structure`,
+			options:              nil,
+			expectError:          true,
+			expectedErrorMessage: "failed to parse head YAML",
+		},
+	}
 
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "ConfigMap")
-		assert.Contains(t, diffResult, "old-value")
-		assert.Contains(t, diffResult, "new-value")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := YamlString(tt.baseYaml, tt.headYaml, tt.options)
 
-		// Check changed resources list
-		changedResourcesList := getChangedResources(results)
-		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, results, "ConfigMap/default/test-config", Changed)
-	})
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErrorMessage)
+				return
+			}
 
-	t.Run("no diff when identical", func(t *testing.T) {
-		results, err := YamlString(baseYaml, baseYaml, nil)
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectChanges, results.HasChanges())
 
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Equal(t, "", diffResult)
+			if tt.expectedResourceKey != "" {
+				assert.Equal(t, tt.expectedCount, results.Count())
+				AssertResourceChange(t, results, tt.expectedResourceKey, tt.expectedChangeType)
+			}
 
-		// The resource should exist but be unchanged
-		changedResourcesList := getChangedResources(results)
-		assert.Equal(t, 0, len(changedResourcesList))
-		// Check that the resource exists as unchanged
-		assertResourceChange(t, results, "ConfigMap/default/test-config", Unchanged)
-	})
+			diffResult := results.StringDiff()
 
-	t.Run("error on invalid base yaml", func(t *testing.T) {
-		invalidYaml := `invalid: yaml: structure`
-		_, err := YamlString(invalidYaml, headYaml, nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to parse base YAML")
-	})
+			if tt.expectEmptyDiff {
+				assert.Equal(t, "", diffResult)
+			} else {
+				for _, expected := range tt.shouldContainInDiff {
+					assert.Contains(t, diffResult, expected)
+				}
+				for _, notExpected := range tt.shouldNotContainInDiff {
+					assert.NotContains(t, diffResult, notExpected)
+				}
+			}
 
-	t.Run("error on invalid head yaml", func(t *testing.T) {
-		invalidYaml := `invalid: yaml: structure`
-		_, err := YamlString(baseYaml, invalidYaml, nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to parse head YAML")
-	})
+			if tt.expectChanges {
+				changedResourcesList := GetChangedResourceKeys(results)
+				if tt.expectedChangeType != Unchanged {
+					assert.Equal(t, 1, len(changedResourcesList))
+				}
+			}
+		})
+	}
 }
 
 func TestYaml(t *testing.T) {
@@ -165,46 +240,7 @@ spec:
     image: nginx:1.21
 `
 
-	t.Run("diff with io.Reader", func(t *testing.T) {
-		baseReader := strings.NewReader(baseYaml)
-		headReader := strings.NewReader(headYaml)
-
-		results, err := Yaml(baseReader, headReader, nil)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "Pod")
-		assert.Contains(t, diffResult, "nginx:1.20")
-		assert.Contains(t, diffResult, "nginx:1.21")
-
-		// Check changed resources list
-		changedResourcesList := getChangedResources(results)
-		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, results, "Pod/default/test-pod", Changed)
-	})
-
-	t.Run("no diff when identical", func(t *testing.T) {
-		baseReader := strings.NewReader(baseYaml)
-		headReader := strings.NewReader(baseYaml)
-
-		results, err := Yaml(baseReader, headReader, nil)
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Equal(t, "", diffResult)
-
-		// The resource should exist but be unchanged
-		changedResourcesList := getChangedResources(results)
-		assert.Equal(t, 0, len(changedResourcesList))
-		// Check that the resource exists as unchanged
-		assertResourceChange(t, results, "Pod/default/test-pod", Unchanged)
-	})
-
-	t.Run("multiple objects in yaml", func(t *testing.T) {
-		multiYamlBase := `
+	multiYamlBase := `
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -220,7 +256,7 @@ data:
   key: value2
 `
 
-		multiYamlHead := `
+	multiYamlHead := `
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -236,40 +272,111 @@ data:
   key: value2
 `
 
-		baseReader := strings.NewReader(multiYamlBase)
-		headReader := strings.NewReader(multiYamlHead)
+	tests := []struct {
+		name                   string
+		baseYaml               string
+		headYaml               string
+		options                *Options
+		expectChanges          bool
+		expectedCount          int
+		expectedResourceKeys   map[string]ChangeType
+		shouldContainInDiff    []string
+		shouldNotContainInDiff []string
+		expectEmptyDiff        bool
+	}{
+		{
+			name:          "diff with io.Reader",
+			baseYaml:      baseYaml,
+			headYaml:      headYaml,
+			options:       nil,
+			expectChanges: true,
+			expectedCount: 1,
+			expectedResourceKeys: map[string]ChangeType{
+				"Pod/default/test-pod": Changed,
+			},
+			shouldContainInDiff: []string{"Pod", "nginx:1.20", "nginx:1.21"},
+		},
+		{
+			name:          "no diff when identical",
+			baseYaml:      baseYaml,
+			headYaml:      baseYaml,
+			options:       nil,
+			expectChanges: false,
+			expectedCount: 1,
+			expectedResourceKeys: map[string]ChangeType{
+				"Pod/default/test-pod": Unchanged,
+			},
+			expectEmptyDiff: true,
+		},
+		{
+			name:          "multiple objects in yaml",
+			baseYaml:      multiYamlBase,
+			headYaml:      multiYamlHead,
+			options:       nil,
+			expectChanges: true,
+			expectedCount: 2,
+			expectedResourceKeys: map[string]ChangeType{
+				"ConfigMap//config1": Changed,
+				"ConfigMap//config2": Unchanged,
+			},
+			shouldContainInDiff: []string{"config1", "value1", "modified-value1"},
+		},
+		{
+			name:          "empty yaml",
+			baseYaml:      "",
+			headYaml:      baseYaml,
+			options:       nil,
+			expectChanges: true,
+			expectedCount: 1,
+			expectedResourceKeys: map[string]ChangeType{
+				"Pod/default/test-pod": Created,
+			},
+		},
+	}
 
-		results, err := Yaml(baseReader, headReader, nil)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseReader := strings.NewReader(tt.baseYaml)
+			headReader := strings.NewReader(tt.headYaml)
 
-		// Should have 2 resources total (config1 changed, config2 unchanged)
-		assert.Equal(t, 2, results.Count())
-		assertResourceChange(t, results, "ConfigMap//config1", Changed)
-		assertResourceChange(t, results, "ConfigMap//config2", Unchanged)
+			results, err := Yaml(baseReader, headReader, tt.options)
 
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "config1")
-		assert.Contains(t, diffResult, "value1")
-		assert.Contains(t, diffResult, "modified-value1")
-	})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectChanges, results.HasChanges())
+			assert.Equal(t, tt.expectedCount, results.Count())
 
-	t.Run("empty yaml", func(t *testing.T) {
-		emptyReader := strings.NewReader("")
-		baseReader := strings.NewReader(baseYaml)
+			for resourceKey, changeType := range tt.expectedResourceKeys {
+				AssertResourceChange(t, results, resourceKey, changeType)
+			}
 
-		results, err := Yaml(emptyReader, baseReader, nil)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
+			diffResult := results.StringDiff()
 
-		// Should show one created resource
-		assert.Equal(t, 1, results.Count())
-		assertResourceChange(t, results, "Pod/default/test-pod", Created)
-	})
+			if tt.expectEmptyDiff {
+				assert.Equal(t, "", diffResult)
+			} else {
+				for _, expected := range tt.shouldContainInDiff {
+					assert.Contains(t, diffResult, expected)
+				}
+				for _, notExpected := range tt.shouldNotContainInDiff {
+					assert.NotContains(t, diffResult, notExpected)
+				}
+			}
+
+			if tt.expectChanges {
+				changedResourcesList := GetChangedResourceKeys(results)
+				changedCount := 0
+				for _, changeType := range tt.expectedResourceKeys {
+					if changeType != Unchanged {
+						changedCount++
+					}
+				}
+				assert.Equal(t, changedCount, len(changedResourcesList))
+			}
+		})
+	}
 }
 
-func TestObjects(t *testing.T) {
-	// Hook pod with annotation
+func TestObjects_Integration(t *testing.T) {
 	hookPod := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
@@ -287,71 +394,111 @@ func TestObjects(t *testing.T) {
 		},
 	}
 
-	t.Run("nodiff", func(t *testing.T) {
-		results, err := Objects([]*unstructured.Unstructured{hookPod}, []*unstructured.Unstructured{hookPod}, nil)
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-		assert.Equal(t, 1, results.Count())
-
-		// Check diff string output - should be empty for identical objects
-		diffResult := results.StringDiff()
-		assert.Equal(t, "", diffResult)
-
-		assertResourceChange(t, results, "Pod/namespace/test", Unchanged)
-	})
-
-	t.Run("exists only head", func(t *testing.T) {
-		results, err := Objects([]*unstructured.Unstructured{}, []*unstructured.Unstructured{hookPod}, nil)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-		assert.Equal(t, 1, results.Count())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "/Pod namespace/test")
-
-		assertResourceChange(t, results, "Pod/namespace/test", Created)
-	})
-
-	t.Run("exists only base", func(t *testing.T) {
-		results, err := Objects([]*unstructured.Unstructured{hookPod}, []*unstructured.Unstructured{}, nil)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-		assert.Equal(t, 1, results.Count())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "/Pod namespace/test")
-
-		assertResourceChange(t, results, "Pod/namespace/test", Deleted)
-	})
-
-	t.Run("workflow excluded by default", func(t *testing.T) {
-		workflow := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "argoproj.io/v1alpha1",
-				"kind":       "Workflow",
-				"metadata": map[string]any{
-					"name": "test-workflow",
-				},
+	workflow := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "argoproj.io/v1alpha1",
+			"kind":       "Workflow",
+			"metadata": map[string]any{
+				"name": "test-workflow",
 			},
-		}
+		},
+	}
 
-		results, err := Objects([]*unstructured.Unstructured{}, []*unstructured.Unstructured{workflow}, DefaultOptions())
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges()) // Should include workflow by default (no exclusion in default options)
-		assert.Equal(t, 1, results.Count())
+	tests := []struct {
+		name                string
+		baseObjects         []*unstructured.Unstructured
+		headObjects         []*unstructured.Unstructured
+		options             *Options
+		expectChanges       bool
+		expectedCount       int
+		expectedResourceKey string
+		expectedChangeType  ChangeType
+		shouldContainInDiff []string
+		expectEmptyDiff     bool
+		validateAdditional  func(t *testing.T, results Results)
+	}{
+		{
+			name:                "nodiff",
+			baseObjects:         []*unstructured.Unstructured{hookPod},
+			headObjects:         []*unstructured.Unstructured{hookPod},
+			options:             nil,
+			expectChanges:       false,
+			expectedCount:       1,
+			expectedResourceKey: "Pod/namespace/test",
+			expectedChangeType:  Unchanged,
+			expectEmptyDiff:     true,
+		},
+		{
+			name:                "exists only head",
+			baseObjects:         []*unstructured.Unstructured{},
+			headObjects:         []*unstructured.Unstructured{hookPod},
+			options:             nil,
+			expectChanges:       true,
+			expectedCount:       1,
+			expectedResourceKey: "Pod/namespace/test",
+			expectedChangeType:  Created,
+			shouldContainInDiff: []string{"/Pod namespace/test"},
+		},
+		{
+			name:                "exists only base",
+			baseObjects:         []*unstructured.Unstructured{hookPod},
+			headObjects:         []*unstructured.Unstructured{},
+			options:             nil,
+			expectChanges:       true,
+			expectedCount:       1,
+			expectedResourceKey: "Pod/namespace/test",
+			expectedChangeType:  Deleted,
+			shouldContainInDiff: []string{"/Pod namespace/test"},
+		},
+		{
+			name:                "workflow included by default",
+			baseObjects:         []*unstructured.Unstructured{},
+			headObjects:         []*unstructured.Unstructured{workflow},
+			options:             DefaultOptions(),
+			expectChanges:       true,
+			expectedCount:       1,
+			expectedResourceKey: "Workflow//test-workflow",
+			expectedChangeType:  Created,
+			validateAdditional: func(t *testing.T, results Results) {
+				keys := results.GetResourceKeys()
+				assert.Equal(t, 1, len(keys))
+				assert.Equal(t, "Workflow", keys[0].Kind)
+				assert.Equal(t, "test-workflow", keys[0].Name)
+				assert.Equal(t, "", keys[0].Namespace)
+			},
+		},
+	}
 
-		// Check that the workflow resource is found
-		keys := results.GetResourceKeys()
-		assert.Equal(t, 1, len(keys))
-		assert.Equal(t, "Workflow", keys[0].Kind)
-		assert.Equal(t, "test-workflow", keys[0].Name)
-		assert.Equal(t, "", keys[0].Namespace) // cluster-scoped
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := Objects(tt.baseObjects, tt.headObjects, tt.options)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectChanges, results.HasChanges())
+			assert.Equal(t, tt.expectedCount, results.Count())
+
+			if tt.expectedResourceKey != "" {
+				AssertResourceChange(t, results, tt.expectedResourceKey, tt.expectedChangeType)
+			}
+
+			diffResult := results.StringDiff()
+
+			if tt.expectEmptyDiff {
+				assert.Equal(t, "", diffResult)
+			} else {
+				for _, expected := range tt.shouldContainInDiff {
+					assert.Contains(t, diffResult, expected)
+				}
+			}
+
+			if tt.validateAdditional != nil {
+				tt.validateAdditional(t, results)
+			}
+		})
+	}
 }
 
-func TestObjectsWithNilOptions(t *testing.T) {
+func TestObjects_WithNilOptions(t *testing.T) {
 	obj := unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
@@ -370,12 +517,10 @@ func TestObjectsWithNilOptions(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, results.HasChanges())
 
-	// Check diff string output
 	diffResult := results.StringDiff()
 	assert.Contains(t, diffResult, "ConfigMap")
 
-	// Check changed resources list
-	changedResourcesList := getChangedResources(results)
+	changedResourcesList := GetChangedResourceKeys(results)
 	assert.Equal(t, 1, len(changedResourcesList))
-	assertResourceChange(t, results, "ConfigMap/test/config", Created)
+	AssertResourceChange(t, results, "ConfigMap/test/config", Created)
 }

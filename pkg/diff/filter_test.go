@@ -7,8 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestLabelSelectorFiltering(t *testing.T) {
-	// Create test objects with different labels
+func TestFilterResources_LabelSelector(t *testing.T) {
 	frontendObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "apps/v1",
@@ -70,94 +69,91 @@ func TestLabelSelectorFiltering(t *testing.T) {
 
 	objects := []*unstructured.Unstructured{frontendObj, backendObj, stagingObj, noLabelsObj}
 
-	t.Run("equality selector filters correctly", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{
-				"tier": "frontend",
-			},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 2, len(filtered))
-		assert.Equal(t, "frontend-app", filtered[0].GetName())
-		assert.Equal(t, "staging-app", filtered[1].GetName())
-	})
+	tests := []struct {
+		name             string
+		labelSelector    map[string]string
+		expectedCount    int
+		expectedNames    []string
+		notExpectedNames []string
+	}{
+		{
+			name:             "equality selector filters correctly",
+			labelSelector:    map[string]string{"tier": "frontend"},
+			expectedCount:    2,
+			expectedNames:    []string{"frontend-app", "staging-app"},
+			notExpectedNames: []string{"backend-app", "config"},
+		},
+		{
+			name:             "multiple equality selectors",
+			labelSelector:    map[string]string{"tier": "frontend", "environment": "production"},
+			expectedCount:    1,
+			expectedNames:    []string{"frontend-app"},
+			notExpectedNames: []string{"backend-app", "staging-app", "config"},
+		},
+		{
+			name:             "production environment selector",
+			labelSelector:    map[string]string{"environment": "production"},
+			expectedCount:    2,
+			expectedNames:    []string{"frontend-app", "backend-app"},
+			notExpectedNames: []string{"staging-app", "config"},
+		},
+		{
+			name:             "specific app selector",
+			labelSelector:    map[string]string{"app": "nginx"},
+			expectedCount:    2,
+			expectedNames:    []string{"frontend-app", "staging-app"},
+			notExpectedNames: []string{"backend-app", "config"},
+		},
+		{
+			name:             "empty selector returns all objects",
+			labelSelector:    nil,
+			expectedCount:    4,
+			expectedNames:    []string{"frontend-app", "backend-app", "staging-app", "config"},
+			notExpectedNames: []string{},
+		},
+		{
+			name:             "empty map selector returns all objects",
+			labelSelector:    map[string]string{},
+			expectedCount:    4,
+			expectedNames:    []string{"frontend-app", "backend-app", "staging-app", "config"},
+			notExpectedNames: []string{},
+		},
+		{
+			name:             "non-matching selector returns empty",
+			labelSelector:    map[string]string{"nonexistent": "value"},
+			expectedCount:    0,
+			expectedNames:    []string{},
+			notExpectedNames: []string{"frontend-app", "backend-app", "staging-app", "config"},
+		},
+	}
 
-	t.Run("multiple equality selectors", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{
-				"tier":        "frontend",
-				"environment": "production",
-			},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 1, len(filtered))
-		assert.Equal(t, "frontend-app", filtered[0].GetName())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &Options{
+				LabelSelector: tt.labelSelector,
+			}
+			filtered := FilterResources(objects, opts)
+			assert.Equal(t, tt.expectedCount, len(filtered))
 
-	t.Run("production environment selector", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{
-				"environment": "production",
-			},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 2, len(filtered)) // frontendObj and backendObj
-		names := make([]string, len(filtered))
-		for i, obj := range filtered {
-			names[i] = obj.GetName()
-		}
-		assert.Contains(t, names, "frontend-app")
-		assert.Contains(t, names, "backend-app")
-		assert.NotContains(t, names, "staging-app")
-		assert.NotContains(t, names, "config")
-	})
+			if tt.expectedCount > 0 {
+				names := make([]string, len(filtered))
+				for i, obj := range filtered {
+					names[i] = obj.GetName()
+				}
 
-	t.Run("specific app selector", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{
-				"app": "nginx",
-			},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 2, len(filtered)) // frontendObj and stagingObj
-		names := make([]string, len(filtered))
-		for i, obj := range filtered {
-			names[i] = obj.GetName()
-		}
-		assert.Contains(t, names, "frontend-app")
-		assert.Contains(t, names, "staging-app")
-		assert.NotContains(t, names, "backend-app")
-		assert.NotContains(t, names, "config")
-	})
+				for _, expectedName := range tt.expectedNames {
+					assert.Contains(t, names, expectedName)
+				}
 
-	t.Run("empty selector returns all objects", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: nil,
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 4, len(filtered))
-	})
-
-	t.Run("empty map selector returns all objects", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 4, len(filtered)) // Should return all objects when selector is empty
-	})
-
-	t.Run("non-matching selector returns empty", func(t *testing.T) {
-		opts := &Options{
-			LabelSelector: map[string]string{
-				"nonexistent": "value",
-			},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 0, len(filtered))
-	})
+				for _, notExpectedName := range tt.notExpectedNames {
+					assert.NotContains(t, names, notExpectedName)
+				}
+			}
+		})
+	}
 }
 
-func TestLabelSelectorWithExcludeKinds(t *testing.T) {
+func TestFilterResources_LabelSelectorWithExcludeKinds(t *testing.T) {
 	deploymentObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "apps/v1",
@@ -186,34 +182,47 @@ func TestLabelSelectorWithExcludeKinds(t *testing.T) {
 
 	objects := []*unstructured.Unstructured{deploymentObj, workflowObj}
 
-	t.Run("label selector with exclude kinds", func(t *testing.T) {
-		opts := &Options{
-			ExcludeKinds: []string{"Workflow"},
-			LabelSelector: map[string]string{
-				"app": "nginx",
-			},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 1, len(filtered))
-		assert.Equal(t, "Deployment", filtered[0].GetKind())
-		assert.Equal(t, "app-deployment", filtered[0].GetName())
-	})
+	tests := []struct {
+		name          string
+		excludeKinds  []string
+		labelSelector map[string]string
+		expectedCount int
+		expectedKind  string
+		expectedName  string
+	}{
+		{
+			name:          "label selector with exclude kinds",
+			excludeKinds:  []string{"Workflow"},
+			labelSelector: map[string]string{"app": "nginx"},
+			expectedCount: 1,
+			expectedKind:  "Deployment",
+			expectedName:  "app-deployment",
+		},
+		{
+			name:          "exclude kinds takes precedence",
+			excludeKinds:  []string{"Deployment"},
+			labelSelector: map[string]string{"app": "nginx"},
+			expectedCount: 1,
+			expectedKind:  "Workflow",
+			expectedName:  "test-workflow",
+		},
+	}
 
-	t.Run("exclude kinds takes precedence", func(t *testing.T) {
-		opts := &Options{
-			ExcludeKinds: []string{"Deployment"},
-			LabelSelector: map[string]string{
-				"app": "nginx",
-			},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 1, len(filtered))
-		assert.Equal(t, "Workflow", filtered[0].GetKind())
-		assert.Equal(t, "test-workflow", filtered[0].GetName())
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &Options{
+				ExcludeKinds:  tt.excludeKinds,
+				LabelSelector: tt.labelSelector,
+			}
+			filtered := FilterResources(objects, opts)
+			assert.Equal(t, tt.expectedCount, len(filtered))
+			assert.Equal(t, tt.expectedKind, filtered[0].GetKind())
+			assert.Equal(t, tt.expectedName, filtered[0].GetName())
+		})
+	}
 }
 
-func TestDiffOptionsFiltering(t *testing.T) {
+func TestObjects_DiffOptionsFiltering(t *testing.T) {
 	hookObj := unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
@@ -261,48 +270,50 @@ func TestDiffOptionsFiltering(t *testing.T) {
 
 	objects := []*unstructured.Unstructured{&hookObj, &secretObj, &workflowObj, &normalObj}
 
-	t.Run("default options include all objects", func(t *testing.T) {
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{}, objects, opts)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "ConfigMap")
-		assert.Contains(t, diffResult, "Secret")
-		assert.Contains(t, diffResult, "Workflow")
-		assert.Contains(t, diffResult, "hook-pod")
-	})
+	tests := []struct {
+		name             string
+		options          *Options
+		shouldContain    []string
+		shouldNotContain []string
+	}{
+		{
+			name:             "default options include all objects",
+			options:          DefaultOptions(),
+			shouldContain:    []string{"ConfigMap", "Secret", "Workflow", "hook-pod"},
+			shouldNotContain: []string{},
+		},
+		{
+			name:             "include all when exclude kinds disabled",
+			options:          &Options{ExcludeKinds: []string{}},
+			shouldContain:    []string{"ConfigMap", "Secret", "Workflow", "hook-pod"},
+			shouldNotContain: []string{},
+		},
+		{
+			name:             "custom exclude kinds",
+			options:          &Options{ExcludeKinds: []string{"ConfigMap", "Secret"}},
+			shouldContain:    []string{"Workflow", "hook-pod"},
+			shouldNotContain: []string{"ConfigMap", "Secret"},
+		},
+	}
 
-	t.Run("include all when exclude kinds disabled", func(t *testing.T) {
-		opts := &Options{
-			ExcludeKinds: []string{},
-		}
-		results, err := Objects([]*unstructured.Unstructured{}, objects, opts)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "ConfigMap")
-		assert.Contains(t, diffResult, "Secret")
-		assert.Contains(t, diffResult, "Workflow")
-		assert.Contains(t, diffResult, "hook-pod")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := Objects([]*unstructured.Unstructured{}, objects, tt.options)
+			assert.NoError(t, err)
+			assert.True(t, results.HasChanges())
 
-	t.Run("custom exclude kinds", func(t *testing.T) {
-		opts := &Options{
-			ExcludeKinds: []string{"ConfigMap", "Secret"},
-		}
-		results, err := Objects([]*unstructured.Unstructured{}, objects, opts)
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-		diffResult := results.StringDiff()
-		assert.NotContains(t, diffResult, "ConfigMap")
-		assert.NotContains(t, diffResult, "Secret")
-		assert.Contains(t, diffResult, "Workflow")
-		assert.Contains(t, diffResult, "hook-pod")
-	})
+			diffResult := results.StringDiff()
+			for _, expected := range tt.shouldContain {
+				assert.Contains(t, diffResult, expected)
+			}
+			for _, notExpected := range tt.shouldNotContain {
+				assert.NotContains(t, diffResult, notExpected)
+			}
+		})
+	}
 }
 
-func TestFilterResourcesBasic(t *testing.T) {
+func TestFilterResources_Basic(t *testing.T) {
 	hookObj := unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
@@ -336,20 +347,37 @@ func TestFilterResourcesBasic(t *testing.T) {
 
 	objects := []*unstructured.Unstructured{&hookObj, &secretObj, &normalObj}
 
-	t.Run("filter by exclude kinds", func(t *testing.T) {
-		opts := &Options{
-			ExcludeKinds: []string{"Secret", "Pod"},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 1, len(filtered))
-		assert.Equal(t, "ConfigMap", filtered[0].GetKind())
-	})
+	tests := []struct {
+		name          string
+		excludeKinds  []string
+		expectedCount int
+		expectedKind  string
+	}{
+		{
+			name:          "filter by exclude kinds",
+			excludeKinds:  []string{"Secret", "Pod"},
+			expectedCount: 1,
+			expectedKind:  "ConfigMap",
+		},
+		{
+			name:          "no filtering",
+			excludeKinds:  []string{},
+			expectedCount: 3,
+			expectedKind:  "",
+		},
+	}
 
-	t.Run("no filtering", func(t *testing.T) {
-		opts := &Options{
-			ExcludeKinds: []string{},
-		}
-		filtered := FilterResources(objects, opts)
-		assert.Equal(t, 3, len(filtered))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := &Options{
+				ExcludeKinds: tt.excludeKinds,
+			}
+			filtered := FilterResources(objects, opts)
+			assert.Equal(t, tt.expectedCount, len(filtered))
+
+			if tt.expectedKind != "" && len(filtered) > 0 {
+				assert.Equal(t, tt.expectedKind, filtered[0].GetKind())
+			}
+		})
+	}
 }

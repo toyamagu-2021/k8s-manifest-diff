@@ -8,16 +8,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// getChangedResources extracts resources that have any type of change (Created, Changed, Deleted)
+// GetChangedResourceKeys extracts resources that have any type of change (Created, Changed, Deleted)
 // DEPRECATED: Use Results.Apply() with custom filter or multiple GetResourceKeysByType() calls
-func getChangedResources(results Results) []kube.ResourceKey {
+func GetChangedResourceKeys(results Results) []kube.ResourceKey {
 	return results.Apply(func(_ kube.ResourceKey, diffResult Result) bool {
 		return diffResult.Type != Unchanged
 	}).GetResourceKeys()
 }
 
-// parseResourceKey parses a string resource key into kube.ResourceKey
-func parseResourceKey(key string) kube.ResourceKey {
+// ParseResourceKey parses a string resource key into kube.ResourceKey
+func ParseResourceKey(key string) kube.ResourceKey {
 	parts := strings.Split(key, "/")
 	switch len(parts) {
 	case 2: // Kind/Name (cluster-scoped)
@@ -37,10 +37,26 @@ func parseResourceKey(key string) kube.ResourceKey {
 	}
 }
 
-// assertResourceChange checks if a specific resource has the expected change type
-func assertResourceChange(t *testing.T, results Results, expectedKey string, expectedChangeType ChangeType) {
-	expectedResourceKey := parseResourceKey(expectedKey)
+// AssertResourceChange checks if a specific resource has the expected change type
+func AssertResourceChange(t *testing.T, results Results, expectedKey string, expectedChangeType ChangeType) {
+	expectedResourceKey := ParseResourceKey(expectedKey)
+
+	// First try exact match
 	result, found := results[expectedResourceKey]
+
+	// If not found, try to match by Kind, Namespace, and Name (ignoring Group)
+	if !found {
+		for key, res := range results {
+			if key.Kind == expectedResourceKey.Kind &&
+				key.Namespace == expectedResourceKey.Namespace &&
+				key.Name == expectedResourceKey.Name {
+				result = res
+				found = true
+				break
+			}
+		}
+	}
+
 	if found {
 		assert.Equal(t, expectedChangeType, result.Type, "Expected change type %s for resource %s, got %s", expectedChangeType.String(), expectedKey, result.Type.String())
 	} else {

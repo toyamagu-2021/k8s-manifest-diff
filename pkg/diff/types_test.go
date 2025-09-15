@@ -8,7 +8,6 @@ import (
 )
 
 func TestResults_FilterByType(t *testing.T) {
-	// Create test results with various change types
 	results := Results{
 		kube.ResourceKey{Kind: "Deployment", Name: "changed-app"}:   {Type: Changed, Diff: "changed diff"},
 		kube.ResourceKey{Kind: "Service", Name: "created-service"}:  {Type: Created, Diff: "created diff"},
@@ -16,20 +15,55 @@ func TestResults_FilterByType(t *testing.T) {
 		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
 	}
 
-	// Test FilterByType
-	changedResults := results.FilterByType(Changed)
-	assert.Equal(t, 1, len(changedResults))
-	assert.Contains(t, changedResults, kube.ResourceKey{Kind: "Deployment", Name: "changed-app"})
+	tests := []struct {
+		name          string
+		changeType    ChangeType
+		expectedCount int
+		expectedKeys  []kube.ResourceKey
+	}{
+		{
+			name:          "filter by Changed type",
+			changeType:    Changed,
+			expectedCount: 1,
+			expectedKeys:  []kube.ResourceKey{{Kind: "Deployment", Name: "changed-app"}},
+		},
+		{
+			name:          "filter by Created type",
+			changeType:    Created,
+			expectedCount: 1,
+			expectedKeys:  []kube.ResourceKey{{Kind: "Service", Name: "created-service"}},
+		},
+		{
+			name:          "filter by Deleted type",
+			changeType:    Deleted,
+			expectedCount: 1,
+			expectedKeys:  []kube.ResourceKey{{Kind: "ConfigMap", Name: "deleted-config"}},
+		},
+		{
+			name:          "filter by Unchanged type",
+			changeType:    Unchanged,
+			expectedCount: 1,
+			expectedKeys:  []kube.ResourceKey{{Kind: "Secret", Name: "unchanged-secret"}},
+		},
+	}
 
-	createdResults := results.FilterByType(Created)
-	assert.Equal(t, 1, len(createdResults))
-	assert.Contains(t, createdResults, kube.ResourceKey{Kind: "Service", Name: "created-service"})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := results.FilterByType(tt.changeType)
+			assert.Equal(t, tt.expectedCount, len(filtered))
 
-	// Test convenience methods
-	assert.Equal(t, changedResults, results.FilterChanged())
-	assert.Equal(t, createdResults, results.FilterCreated())
-	assert.Equal(t, results.FilterByType(Deleted), results.FilterDeleted())
-	assert.Equal(t, results.FilterByType(Unchanged), results.FilterUnchanged())
+			for _, expectedKey := range tt.expectedKeys {
+				assert.Contains(t, filtered, expectedKey)
+			}
+		})
+	}
+
+	t.Run("convenience methods match FilterByType", func(t *testing.T) {
+		assert.Equal(t, results.FilterByType(Changed), results.FilterChanged())
+		assert.Equal(t, results.FilterByType(Created), results.FilterCreated())
+		assert.Equal(t, results.FilterByType(Deleted), results.FilterDeleted())
+		assert.Equal(t, results.FilterByType(Unchanged), results.FilterUnchanged())
+	})
 }
 
 func TestResults_FilterByAttributes(t *testing.T) {
@@ -40,22 +74,58 @@ func TestResults_FilterByAttributes(t *testing.T) {
 		kube.ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
 	}
 
-	// Test FilterByKind
-	deployments := results.FilterByKind("Deployment")
-	assert.Equal(t, 2, len(deployments))
+	tests := []struct {
+		name          string
+		filterFunc    func(Results) Results
+		expectedCount int
+		expectedKeys  []kube.ResourceKey
+	}{
+		{
+			name:          "filter by Kind - Deployment",
+			filterFunc:    func(r Results) Results { return r.FilterByKind("Deployment") },
+			expectedCount: 2,
+			expectedKeys: []kube.ResourceKey{
+				{Kind: "Deployment", Namespace: "default", Name: "app1"},
+				{Kind: "Deployment", Namespace: "production", Name: "app2"},
+			},
+		},
+		{
+			name:          "filter by Namespace - default",
+			filterFunc:    func(r Results) Results { return r.FilterByNamespace("default") },
+			expectedCount: 3,
+			expectedKeys: []kube.ResourceKey{
+				{Kind: "Deployment", Namespace: "default", Name: "app1"},
+				{Kind: "Service", Namespace: "default", Name: "app1"},
+				{Kind: "ConfigMap", Namespace: "default", Name: "config"},
+			},
+		},
+		{
+			name:          "filter by ResourceName - app1",
+			filterFunc:    func(r Results) Results { return r.FilterByResourceName("app1") },
+			expectedCount: 2,
+			expectedKeys: []kube.ResourceKey{
+				{Kind: "Deployment", Namespace: "default", Name: "app1"},
+				{Kind: "Service", Namespace: "default", Name: "app1"},
+			},
+		},
+		{
+			name:          "chained filters - default namespace Deployments",
+			filterFunc:    func(r Results) Results { return r.FilterByNamespace("default").FilterByKind("Deployment") },
+			expectedCount: 1,
+			expectedKeys:  []kube.ResourceKey{{Kind: "Deployment", Namespace: "default", Name: "app1"}},
+		},
+	}
 
-	// Test FilterByNamespace
-	defaultNS := results.FilterByNamespace("default")
-	assert.Equal(t, 3, len(defaultNS))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := tt.filterFunc(results)
+			assert.Equal(t, tt.expectedCount, len(filtered))
 
-	// Test FilterByResourceName
-	app1Resources := results.FilterByResourceName("app1")
-	assert.Equal(t, 2, len(app1Resources))
-
-	// Test chaining filters
-	defaultDeployments := results.FilterByNamespace("default").FilterByKind("Deployment")
-	assert.Equal(t, 1, len(defaultDeployments))
-	assert.Contains(t, defaultDeployments, kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"})
+			for _, expectedKey := range tt.expectedKeys {
+				assert.Contains(t, filtered, expectedKey)
+			}
+		})
+	}
 }
 
 func TestResults_Apply(t *testing.T) {
@@ -66,14 +136,51 @@ func TestResults_Apply(t *testing.T) {
 		kube.ResourceKey{Kind: "ConfigMap", Namespace: "default", Name: "config"}:   {Type: Unchanged, Diff: ""},
 	}
 
-	// Filter resources in default namespace that have changes
-	filtered := results.Apply(func(key kube.ResourceKey, result Result) bool {
-		return key.Namespace == "default" && result.Type != Unchanged
-	})
+	tests := []struct {
+		name          string
+		filterFunc    func(key kube.ResourceKey, result Result) bool
+		expectedCount int
+		expectedKeys  []kube.ResourceKey
+	}{
+		{
+			name: "default namespace with changes",
+			filterFunc: func(key kube.ResourceKey, result Result) bool {
+				return key.Namespace == "default" && result.Type != Unchanged
+			},
+			expectedCount: 2,
+			expectedKeys: []kube.ResourceKey{
+				{Kind: "Deployment", Namespace: "default", Name: "app1"},
+				{Kind: "Service", Namespace: "default", Name: "app1"},
+			},
+		},
+		{
+			name: "production namespace resources",
+			filterFunc: func(key kube.ResourceKey, _ Result) bool {
+				return key.Namespace == "production"
+			},
+			expectedCount: 1,
+			expectedKeys:  []kube.ResourceKey{{Kind: "Deployment", Namespace: "production", Name: "app2"}},
+		},
+		{
+			name: "only unchanged resources",
+			filterFunc: func(_ kube.ResourceKey, result Result) bool {
+				return result.Type == Unchanged
+			},
+			expectedCount: 1,
+			expectedKeys:  []kube.ResourceKey{{Kind: "ConfigMap", Namespace: "default", Name: "config"}},
+		},
+	}
 
-	assert.Equal(t, 2, len(filtered))
-	assert.Contains(t, filtered, kube.ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"})
-	assert.Contains(t, filtered, kube.ResourceKey{Kind: "Service", Namespace: "default", Name: "app1"})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filtered := results.Apply(tt.filterFunc)
+			assert.Equal(t, tt.expectedCount, len(filtered))
+
+			for _, expectedKey := range tt.expectedKeys {
+				assert.Contains(t, filtered, expectedKey)
+			}
+		})
+	}
 }
 
 func TestResults_Analysis(t *testing.T) {
@@ -84,70 +191,138 @@ func TestResults_Analysis(t *testing.T) {
 		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}:  {Type: Unchanged, Diff: ""},
 	}
 
-	// Test HasChanges
-	assert.True(t, results.HasChanges())
-
 	noChangesResults := Results{
 		kube.ResourceKey{Kind: "Secret", Name: "unchanged-secret"}: {Type: Unchanged, Diff: ""},
 	}
-	assert.False(t, noChangesResults.HasChanges())
 
-	// Test IsEmpty
-	assert.False(t, results.IsEmpty())
 	emptyResults := Results{}
-	assert.True(t, emptyResults.IsEmpty())
 
-	// Test Count
-	assert.Equal(t, 4, results.Count())
-	assert.Equal(t, 0, emptyResults.Count())
+	tests := []struct {
+		name                string
+		results             Results
+		expectedHasChanges  bool
+		expectedIsEmpty     bool
+		expectedCount       int
+		expectedCountByType map[ChangeType]int
+	}{
+		{
+			name:               "results with changes",
+			results:            results,
+			expectedHasChanges: true,
+			expectedIsEmpty:    false,
+			expectedCount:      4,
+			expectedCountByType: map[ChangeType]int{
+				Changed:   1,
+				Created:   1,
+				Deleted:   1,
+				Unchanged: 1,
+			},
+		},
+		{
+			name:               "results without changes",
+			results:            noChangesResults,
+			expectedHasChanges: false,
+			expectedIsEmpty:    false,
+			expectedCount:      1,
+			expectedCountByType: map[ChangeType]int{
+				Changed:   0,
+				Created:   0,
+				Deleted:   0,
+				Unchanged: 1,
+			},
+		},
+		{
+			name:               "empty results",
+			results:            emptyResults,
+			expectedHasChanges: false,
+			expectedIsEmpty:    true,
+			expectedCount:      0,
+			expectedCountByType: map[ChangeType]int{
+				Changed:   0,
+				Created:   0,
+				Deleted:   0,
+				Unchanged: 0,
+			},
+		},
+	}
 
-	// Test CountByType
-	assert.Equal(t, 1, results.CountByType(Changed))
-	assert.Equal(t, 1, results.CountByType(Created))
-	assert.Equal(t, 1, results.CountByType(Deleted))
-	assert.Equal(t, 1, results.CountByType(Unchanged))
-	assert.Equal(t, 0, results.CountByType(ChangeType(99))) // Invalid type
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expectedHasChanges, tt.results.HasChanges())
+			assert.Equal(t, tt.expectedIsEmpty, tt.results.IsEmpty())
+			assert.Equal(t, tt.expectedCount, tt.results.Count())
 
-	// Test GetResourceKeys
-	keys := results.GetResourceKeys()
-	assert.Equal(t, 4, len(keys))
+			for changeType, expectedCount := range tt.expectedCountByType {
+				assert.Equal(t, expectedCount, tt.results.CountByType(changeType))
+			}
 
-	// Test GetResourceKeysByType
-	changedKeys := results.GetResourceKeysByType(Changed)
-	assert.Equal(t, 1, len(changedKeys))
-	assert.Equal(t, "changed-app", changedKeys[0].Name)
+			keys := tt.results.GetResourceKeys()
+			assert.Equal(t, tt.expectedCount, len(keys))
+		})
+	}
 
-	createdKeys := results.GetResourceKeysByType(Created)
-	assert.Equal(t, 1, len(createdKeys))
-	assert.Equal(t, "created-service", createdKeys[0].Name)
+	t.Run("GetResourceKeysByType", func(t *testing.T) {
+		changedKeys := results.GetResourceKeysByType(Changed)
+		assert.Equal(t, 1, len(changedKeys))
+		assert.Equal(t, "changed-app", changedKeys[0].Name)
+
+		createdKeys := results.GetResourceKeysByType(Created)
+		assert.Equal(t, 1, len(createdKeys))
+		assert.Equal(t, "created-service", createdKeys[0].Name)
+
+		invalidKeys := results.GetResourceKeysByType(ChangeType(99))
+		assert.Equal(t, 0, len(invalidKeys))
+	})
 }
 
 func TestResults_GetStatistics(t *testing.T) {
-	results := Results{
-		kube.ResourceKey{Kind: "Deployment", Name: "app1"}:  {Type: Changed, Diff: "diff1"},
-		kube.ResourceKey{Kind: "Deployment", Name: "app2"}:  {Type: Changed, Diff: "diff2"},
-		kube.ResourceKey{Kind: "Service", Name: "svc1"}:     {Type: Created, Diff: "diff3"},
-		kube.ResourceKey{Kind: "ConfigMap", Name: "config"}: {Type: Deleted, Diff: "diff4"},
-		kube.ResourceKey{Kind: "Secret", Name: "secret1"}:   {Type: Unchanged, Diff: ""},
-		kube.ResourceKey{Kind: "Secret", Name: "secret2"}:   {Type: Unchanged, Diff: ""},
+	tests := []struct {
+		name              string
+		results           Results
+		expectedTotal     int
+		expectedChanged   int
+		expectedCreated   int
+		expectedDeleted   int
+		expectedUnchanged int
+	}{
+		{
+			name: "mixed results",
+			results: Results{
+				kube.ResourceKey{Kind: "Deployment", Name: "app1"}:  {Type: Changed, Diff: "diff1"},
+				kube.ResourceKey{Kind: "Deployment", Name: "app2"}:  {Type: Changed, Diff: "diff2"},
+				kube.ResourceKey{Kind: "Service", Name: "svc1"}:     {Type: Created, Diff: "diff3"},
+				kube.ResourceKey{Kind: "ConfigMap", Name: "config"}: {Type: Deleted, Diff: "diff4"},
+				kube.ResourceKey{Kind: "Secret", Name: "secret1"}:   {Type: Unchanged, Diff: ""},
+				kube.ResourceKey{Kind: "Secret", Name: "secret2"}:   {Type: Unchanged, Diff: ""},
+			},
+			expectedTotal:     6,
+			expectedChanged:   2,
+			expectedCreated:   1,
+			expectedDeleted:   1,
+			expectedUnchanged: 2,
+		},
+		{
+			name:              "empty results",
+			results:           Results{},
+			expectedTotal:     0,
+			expectedChanged:   0,
+			expectedCreated:   0,
+			expectedDeleted:   0,
+			expectedUnchanged: 0,
+		},
 	}
 
-	stats := results.GetStatistics()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stats := tt.results.GetStatistics()
 
-	assert.Equal(t, 6, stats.Total)
-	assert.Equal(t, 2, stats.Changed)
-	assert.Equal(t, 1, stats.Created)
-	assert.Equal(t, 1, stats.Deleted)
-	assert.Equal(t, 2, stats.Unchanged)
-
-	// Test with empty results
-	emptyResults := Results{}
-	emptyStats := emptyResults.GetStatistics()
-	assert.Equal(t, 0, emptyStats.Total)
-	assert.Equal(t, 0, emptyStats.Changed)
-	assert.Equal(t, 0, emptyStats.Created)
-	assert.Equal(t, 0, emptyStats.Deleted)
-	assert.Equal(t, 0, emptyStats.Unchanged)
+			assert.Equal(t, tt.expectedTotal, stats.Total)
+			assert.Equal(t, tt.expectedChanged, stats.Changed)
+			assert.Equal(t, tt.expectedCreated, stats.Created)
+			assert.Equal(t, tt.expectedDeleted, stats.Deleted)
+			assert.Equal(t, tt.expectedUnchanged, stats.Unchanged)
+		})
+	}
 }
 
 func TestResults_StringSummary(t *testing.T) {
@@ -159,34 +334,68 @@ func TestResults_StringSummary(t *testing.T) {
 		kube.ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}:     {Type: Unchanged, Diff: ""},
 	}
 
-	summary := results.StringSummary()
-
-	// Check that each section is present
-	assert.Contains(t, summary, "Unchanged:")
-	assert.Contains(t, summary, "Changed:")
-	assert.Contains(t, summary, "Create:")
-	assert.Contains(t, summary, "Delete:")
-
-	// Check specific resources are listed correctly
-	assert.Contains(t, summary, "Secret/default/secret1") // Namespaced resource
-	assert.Contains(t, summary, "Deployment/default/app1")
-	assert.Contains(t, summary, "Deployment/production/app2")
-	assert.Contains(t, summary, "Service/default/svc1")
-	assert.Contains(t, summary, "ConfigMap/config1") // Cluster-scoped resource
-
-	// Test with empty results
-	emptyResults := Results{}
-	emptySummary := emptyResults.StringSummary()
-	assert.Equal(t, "", emptySummary)
-
-	// Test with no changes (only unchanged)
 	unchangedOnlyResults := Results{
 		kube.ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}: {Type: Unchanged, Diff: ""},
 	}
-	unchangedSummary := unchangedOnlyResults.StringSummary()
-	assert.Contains(t, unchangedSummary, "Unchanged:")
-	assert.Contains(t, unchangedSummary, "Secret/default/secret1")
-	assert.NotContains(t, unchangedSummary, "Changed:")
-	assert.NotContains(t, unchangedSummary, "Create:")
-	assert.NotContains(t, unchangedSummary, "Delete:")
+
+	emptyResults := Results{}
+
+	tests := []struct {
+		name             string
+		results          Results
+		shouldContain    []string
+		shouldNotContain []string
+		expectEmpty      bool
+	}{
+		{
+			name:    "mixed results summary",
+			results: results,
+			shouldContain: []string{
+				"Unchanged:", "Changed:", "Create:", "Delete:",
+				"Secret/default/secret1",
+				"Deployment/default/app1",
+				"Deployment/production/app2",
+				"Service/default/svc1",
+				"ConfigMap/config1",
+			},
+			shouldNotContain: []string{},
+			expectEmpty:      false,
+		},
+		{
+			name:    "unchanged only summary",
+			results: unchangedOnlyResults,
+			shouldContain: []string{
+				"Unchanged:",
+				"Secret/default/secret1",
+			},
+			shouldNotContain: []string{
+				"Changed:", "Create:", "Delete:",
+			},
+			expectEmpty: false,
+		},
+		{
+			name:        "empty results summary",
+			results:     emptyResults,
+			expectEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			summary := tt.results.StringSummary()
+
+			if tt.expectEmpty {
+				assert.Equal(t, "", summary)
+				return
+			}
+
+			for _, expected := range tt.shouldContain {
+				assert.Contains(t, summary, expected)
+			}
+
+			for _, notExpected := range tt.shouldNotContain {
+				assert.NotContains(t, summary, notExpected)
+			}
+		})
+	}
 }
