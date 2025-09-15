@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/pmezard/go-difflib/difflib"
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -113,8 +112,8 @@ func determineDiffExitCode(diffText string) int {
 
 // parseObjsToMap converts base and head unstructured arrays to a map
 // Key is Kubernetes identifier, values can be nil if only present in one side
-func parseObjsToMap(base, head []*unstructured.Unstructured) map[kube.ResourceKey]objBaseHead {
-	objMap := map[kube.ResourceKey]objBaseHead{}
+func parseObjsToMap(base, head []*unstructured.Unstructured) map[ResourceKey]objBaseHead {
+	objMap := map[ResourceKey]objBaseHead{}
 	for _, obj := range base {
 		key := getResourceKeyFromObj(obj)
 		objMap[key] = objBaseHead{base: obj, head: nil}
@@ -134,12 +133,12 @@ func parseObjsToMap(base, head []*unstructured.Unstructured) map[kube.ResourceKe
 }
 
 // getResourceKeyFromObj extracts ResourceKey from unstructured object
-func getResourceKeyFromObj(obj *unstructured.Unstructured) kube.ResourceKey {
+func getResourceKeyFromObj(obj *unstructured.Unstructured) ResourceKey {
 	name := obj.GetName()
 	if name == "" {
 		name = obj.GetGenerateName()
 	}
-	return kube.ResourceKey{
+	return ResourceKey{
 		Name:      name,
 		Namespace: obj.GetNamespace(),
 		Group:     obj.GroupVersionKind().Group,
