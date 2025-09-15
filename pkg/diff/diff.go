@@ -11,7 +11,6 @@ import (
 )
 
 // YamlString compares two YAML strings and returns the diff
-// Returns: Results, error
 func YamlString(baseYaml, headYaml string, opts *Options) (Results, error) {
 	baseReader := strings.NewReader(baseYaml)
 	headReader := strings.NewReader(headYaml)
@@ -19,7 +18,6 @@ func YamlString(baseYaml, headYaml string, opts *Options) (Results, error) {
 }
 
 // Yaml compares YAML from two io.Reader sources and returns the diff
-// Returns: Results, error
 func Yaml(baseReader, headReader io.Reader, opts *Options) (Results, error) {
 	baseObjects, err := parser.ParseYAML(baseReader)
 	if err != nil {
@@ -35,7 +33,6 @@ func Yaml(baseReader, headReader io.Reader, opts *Options) (Results, error) {
 }
 
 // Objects compares two sets of Kubernetes objects and returns the diff
-// Returns: Results, error
 func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, error) {
 	if opts == nil {
 		opts = DefaultOptions()

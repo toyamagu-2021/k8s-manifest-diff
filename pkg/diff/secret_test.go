@@ -8,9 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// TestSecretMasking tests the secret masking functionality
-// Test approach inspired by ArgoCD gitops-engine's secret masking tests
-func TestSecretMasking(t *testing.T) {
+func TestObjects_SecretMasking(t *testing.T) {
 	baseSecret := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
@@ -43,294 +41,309 @@ func TestSecretMasking(t *testing.T) {
 		},
 	}
 
-	t.Run("masks secret values by default", func(t *testing.T) {
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
-
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-
-		diffResult := results.StringDiff()
-		assert.Contains(t, diffResult, "test-secret")
-
-		// Should not contain actual values
-		assert.NotContains(t, diffResult, "cGFzc3dvcmQxMjM=")
-		assert.NotContains(t, diffResult, "bmV3cGFzc3dvcmQ=")
-		assert.NotContains(t, diffResult, "YWRtaW4=")
-
-		// Should contain masked values with + symbols
-		assert.Contains(t, diffResult, "++++++++++++++++")
-
-		// Check changed resources list
-		changedResourcesList := getChangedResources(results)
-		assert.Equal(t, 1, len(changedResourcesList))
-		assertResourceChange(t, results, "Secret/default/test-secret", Changed)
-	})
-
-	t.Run("same values get same mask, different values get different masks", func(t *testing.T) {
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
-
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-
-		// Count occurrences of different mask lengths
-		base16Plus := strings.Count(diffResult, "++++++++++++++++")  // 16 +
-		base17Plus := strings.Count(diffResult, "+++++++++++++++++") // 17 +
-
-		// Should have masks of different lengths for different values
-		assert.True(t, base16Plus > 0 || base17Plus > 0, "Should contain masked values")
-	})
-
-	t.Run("can disable secret masking", func(t *testing.T) {
-		opts := &Options{
-			DisableMaskSecrets: true,
-			Context:            3,
-		}
-		results, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
-
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		// Should contain actual values when masking is disabled
-		assert.Contains(t, diffResult, "cGFzc3dvcmQxMjM=")
-		assert.Contains(t, diffResult, "bmV3cGFzc3dvcmQ=")
-	})
-
-	t.Run("handles stringData field", func(t *testing.T) {
-		secretWithStringData := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "Secret",
-				"metadata": map[string]any{
-					"name":      "string-secret",
-					"namespace": "default",
-				},
-				"type": "Opaque",
-				"stringData": map[string]any{
-					"config": "plain-text-config",
-					"token":  "plain-text-token",
-				},
+	secretWithStringData := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "string-secret",
+				"namespace": "default",
 			},
-		}
-
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{secretWithStringData}, []*unstructured.Unstructured{secretWithStringData}, opts)
-
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges()) // Same object should not have diff
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Equal(t, "", diffResult)
-	})
-
-	t.Run("non-secret objects are not affected", func(t *testing.T) {
-		configMap := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"metadata": map[string]any{
-					"name":      "test-config",
-					"namespace": "default",
-				},
-				"data": map[string]any{
-					"config": "some-value",
-				},
+			"type": "Opaque",
+			"stringData": map[string]any{
+				"config": "plain-text-config",
+				"token":  "plain-text-token",
 			},
-		}
+		},
+	}
 
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{configMap}, []*unstructured.Unstructured{configMap}, opts)
-
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Equal(t, "", diffResult)
-	})
-
-	t.Run("mixed objects - only secrets are masked", func(t *testing.T) {
-		configMapBase := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"metadata": map[string]any{
-					"name":      "test-config",
-					"namespace": "default",
-				},
-				"data": map[string]any{
-					"config": "original-value",
-				},
+	configMap := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "test-config",
+				"namespace": "default",
 			},
-		}
-
-		configMapHead := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "ConfigMap",
-				"metadata": map[string]any{
-					"name":      "test-config",
-					"namespace": "default",
-				},
-				"data": map[string]any{
-					"config": "updated-value",
-				},
+			"data": map[string]any{
+				"config": "some-value",
 			},
-		}
+		},
+	}
 
-		opts := DefaultOptions()
-		baseObjects := []*unstructured.Unstructured{baseSecret, configMapBase}
-		headObjects := []*unstructured.Unstructured{headSecret, configMapHead}
-
-		results, err := Objects(baseObjects, headObjects, opts)
-
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-
-		// Secret values should be masked
-		assert.NotContains(t, diffResult, "cGFzc3dvcmQxMjM=")
-		assert.NotContains(t, diffResult, "bmV3cGFzc3dvcmQ=")
-
-		// ConfigMap values should not be masked
-		assert.Contains(t, diffResult, "original-value")
-		assert.Contains(t, diffResult, "updated-value")
-	})
-
-	t.Run("secret with empty data fields", func(t *testing.T) {
-		emptySecret := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "Secret",
-				"metadata": map[string]any{
-					"name":      "empty-secret",
-					"namespace": "default",
-				},
-				"type": "Opaque",
+	configMapBase := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "test-config",
+				"namespace": "default",
 			},
-		}
-
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{emptySecret}, []*unstructured.Unstructured{emptySecret}, opts)
-
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Equal(t, "", diffResult)
-	})
-
-	t.Run("secret with nil values", func(t *testing.T) {
-		secretWithNil := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "Secret",
-				"metadata": map[string]any{
-					"name":      "nil-secret",
-					"namespace": "default",
-				},
-				"type": "Opaque",
-				"data": map[string]any{
-					"key1": nil,
-					"key2": "dmFsdWU=",
-				},
+			"data": map[string]any{
+				"config": "original-value",
 			},
-		}
+		},
+	}
 
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{secretWithNil}, []*unstructured.Unstructured{secretWithNil}, opts)
-
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-
-		// Check diff string output
-		diffResult := results.StringDiff()
-		assert.Equal(t, "", diffResult)
-	})
-
-	t.Run("secret with both data and stringData", func(t *testing.T) {
-		mixedSecretBase := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "Secret",
-				"metadata": map[string]any{
-					"name":      "mixed-secret",
-					"namespace": "default",
-				},
-				"type": "Opaque",
-				"data": map[string]any{
-					"encoded": "ZW5jb2RlZC12YWx1ZQ==", // base64 encoded "encoded-value"
-				},
-				"stringData": map[string]any{
-					"plain": "plain-value",
-				},
+	configMapHead := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "test-config",
+				"namespace": "default",
 			},
-		}
-
-		mixedSecretHead := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "Secret",
-				"metadata": map[string]any{
-					"name":      "mixed-secret",
-					"namespace": "default",
-				},
-				"type": "Opaque",
-				"data": map[string]any{
-					"encoded": "bmV3LWVuY29kZWQtdmFsdWU=", // base64 encoded "new-encoded-value"
-				},
-				"stringData": map[string]any{
-					"plain": "new-plain-value",
-				},
+			"data": map[string]any{
+				"config": "updated-value",
 			},
-		}
+		},
+	}
 
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{mixedSecretBase}, []*unstructured.Unstructured{mixedSecretHead}, opts)
+	emptySecret := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "empty-secret",
+				"namespace": "default",
+			},
+			"type": "Opaque",
+		},
+	}
 
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
+	tests := []struct {
+		name                  string
+		baseObjects           []*unstructured.Unstructured
+		headObjects           []*unstructured.Unstructured
+		options               *Options
+		expectChanges         bool
+		shouldContain         []string
+		shouldNotContain      []string
+		checkMaskedValues     bool
+		checkChangedResources bool
+		expectEmptyDiff       bool
+	}{
+		{
+			name:                  "masks secret values by default",
+			baseObjects:           []*unstructured.Unstructured{baseSecret},
+			headObjects:           []*unstructured.Unstructured{headSecret},
+			options:               DefaultOptions(),
+			expectChanges:         true,
+			shouldContain:         []string{"test-secret", "++++++++++++++++"},
+			shouldNotContain:      []string{"cGFzc3dvcmQxMjM=", "bmV3cGFzc3dvcmQ=", "YWRtaW4="},
+			checkMaskedValues:     true,
+			checkChangedResources: true,
+		},
+		{
+			name:              "same values get same mask, different values get different masks",
+			baseObjects:       []*unstructured.Unstructured{baseSecret},
+			headObjects:       []*unstructured.Unstructured{headSecret},
+			options:           DefaultOptions(),
+			expectChanges:     true,
+			checkMaskedValues: true,
+		},
+		{
+			name:        "can disable secret masking",
+			baseObjects: []*unstructured.Unstructured{baseSecret},
+			headObjects: []*unstructured.Unstructured{headSecret},
+			options: &Options{
+				DisableMaskSecrets: true,
+				Context:            3,
+			},
+			expectChanges:    true,
+			shouldContain:    []string{"cGFzc3dvcmQxMjM=", "bmV3cGFzc3dvcmQ="},
+			shouldNotContain: []string{},
+		},
+		{
+			name:            "handles stringData field",
+			baseObjects:     []*unstructured.Unstructured{secretWithStringData},
+			headObjects:     []*unstructured.Unstructured{secretWithStringData},
+			options:         DefaultOptions(),
+			expectChanges:   false,
+			expectEmptyDiff: true,
+		},
+		{
+			name:            "non-secret objects are not affected",
+			baseObjects:     []*unstructured.Unstructured{configMap},
+			headObjects:     []*unstructured.Unstructured{configMap},
+			options:         DefaultOptions(),
+			expectChanges:   false,
+			expectEmptyDiff: true,
+		},
+		{
+			name:             "mixed objects - only secrets are masked",
+			baseObjects:      []*unstructured.Unstructured{baseSecret, configMapBase},
+			headObjects:      []*unstructured.Unstructured{headSecret, configMapHead},
+			options:          DefaultOptions(),
+			expectChanges:    true,
+			shouldNotContain: []string{"cGFzc3dvcmQxMjM=", "bmV3cGFzc3dvcmQ="},
+			shouldContain:    []string{"original-value", "updated-value"},
+		},
+		{
+			name:            "secret with empty data fields",
+			baseObjects:     []*unstructured.Unstructured{emptySecret},
+			headObjects:     []*unstructured.Unstructured{emptySecret},
+			options:         DefaultOptions(),
+			expectChanges:   false,
+			expectEmptyDiff: true,
+		},
+	}
 
-		// Check diff string output
-		diffResult := results.StringDiff()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := Objects(tt.baseObjects, tt.headObjects, tt.options)
 
-		// Both data and stringData values should be masked
-		assert.NotContains(t, diffResult, "ZW5jb2RlZC12YWx1ZQ==")
-		assert.NotContains(t, diffResult, "bmV3LWVuY29kZWQtdmFsdWU=")
-		assert.NotContains(t, diffResult, "plain-value")
-		assert.NotContains(t, diffResult, "new-plain-value")
-	})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectChanges, results.HasChanges())
+
+			diffResult := results.StringDiff()
+
+			if tt.expectEmptyDiff {
+				assert.Equal(t, "", diffResult)
+				return
+			}
+
+			for _, expected := range tt.shouldContain {
+				assert.Contains(t, diffResult, expected)
+			}
+
+			for _, notExpected := range tt.shouldNotContain {
+				assert.NotContains(t, diffResult, notExpected)
+			}
+
+			if tt.checkMaskedValues {
+				base16Plus := strings.Count(diffResult, "++++++++++++++++")  // 16 +
+				base17Plus := strings.Count(diffResult, "+++++++++++++++++") // 17 +
+				assert.True(t, base16Plus > 0 || base17Plus > 0, "Should contain masked values")
+			}
+
+			if tt.checkChangedResources {
+				changedResourcesList := GetChangedResourceKeys(results)
+				assert.Equal(t, 1, len(changedResourcesList))
+				AssertResourceChange(t, results, "Secret/default/test-secret", Changed)
+			}
+		})
+	}
 
 	t.Run("mask consistency across multiple diff operations", func(t *testing.T) {
-		// Test to ensure mask consistency follows the same pattern as ArgoCD
 		opts := DefaultOptions()
 
-		// First diff operation
 		results1, err1 := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 		assert.NoError(t, err1)
 
-		// Second diff operation with same secrets
 		results2, err2 := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 		assert.NoError(t, err2)
 
-		// Results should be consistent
 		diff1 := results1.StringDiff()
 		diff2 := results2.StringDiff()
 		assert.Equal(t, diff1, diff2, "Diff results should be consistent across multiple operations")
 	})
 }
 
-func TestSecretMaskingYAML(t *testing.T) {
+func TestObjects_SecretMaskingAdvanced(t *testing.T) {
+	secretWithNil := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "nil-secret",
+				"namespace": "default",
+			},
+			"type": "Opaque",
+			"data": map[string]any{
+				"key1": nil,
+				"key2": "dmFsdWU=",
+			},
+		},
+	}
+
+	mixedSecretBase := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "mixed-secret",
+				"namespace": "default",
+			},
+			"type": "Opaque",
+			"data": map[string]any{
+				"encoded": "ZW5jb2RlZC12YWx1ZQ==", // base64 encoded "encoded-value"
+			},
+			"stringData": map[string]any{
+				"plain": "plain-value",
+			},
+		},
+	}
+
+	mixedSecretHead := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "mixed-secret",
+				"namespace": "default",
+			},
+			"type": "Opaque",
+			"data": map[string]any{
+				"encoded": "bmV3LWVuY29kZWQtdmFsdWU=", // base64 encoded "new-encoded-value"
+			},
+			"stringData": map[string]any{
+				"plain": "new-plain-value",
+			},
+		},
+	}
+
+	tests := []struct {
+		name             string
+		baseObjects      []*unstructured.Unstructured
+		headObjects      []*unstructured.Unstructured
+		options          *Options
+		expectChanges    bool
+		shouldNotContain []string
+	}{
+		{
+			name:          "secret with nil values",
+			baseObjects:   []*unstructured.Unstructured{secretWithNil},
+			headObjects:   []*unstructured.Unstructured{secretWithNil},
+			options:       DefaultOptions(),
+			expectChanges: false,
+		},
+		{
+			name:          "secret with both data and stringData",
+			baseObjects:   []*unstructured.Unstructured{mixedSecretBase},
+			headObjects:   []*unstructured.Unstructured{mixedSecretHead},
+			options:       DefaultOptions(),
+			expectChanges: true,
+			shouldNotContain: []string{
+				"ZW5jb2RlZC12YWx1ZQ==",
+				"bmV3LWVuY29kZWQtdmFsdWU=",
+				"plain-value",
+				"new-plain-value",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := Objects(tt.baseObjects, tt.headObjects, tt.options)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectChanges, results.HasChanges())
+
+			if tt.expectChanges {
+				diffResult := results.StringDiff()
+				for _, notExpected := range tt.shouldNotContain {
+					assert.NotContains(t, diffResult, notExpected)
+				}
+			} else {
+				diffResult := results.StringDiff()
+				assert.Equal(t, "", diffResult)
+			}
+		})
+	}
+}
+
+func TestYamlString_SecretMasking(t *testing.T) {
 	baseYaml := `
 apiVersion: v1
 kind: Secret
@@ -355,90 +368,116 @@ data:
   username: YWRtaW4=
 `
 
-	t.Run("yaml diff with secret masking enabled", func(t *testing.T) {
-		opts := DefaultOptions()
-		results, err := YamlString(baseYaml, headYaml, opts)
+	tests := []struct {
+		name             string
+		options          *Options
+		shouldContain    []string
+		shouldNotContain []string
+	}{
+		{
+			name:             "yaml diff with secret masking enabled",
+			options:          DefaultOptions(),
+			shouldContain:    []string{"++++++++++++++++"},
+			shouldNotContain: []string{"cGFzc3dvcmQxMjM=", "bmV3cGFzc3dvcmQ="},
+		},
+		{
+			name: "yaml diff with secret masking disabled",
+			options: &Options{
+				DisableMaskSecrets: true,
+				Context:            3,
+			},
+			shouldContain:    []string{"cGFzc3dvcmQxMjM=", "bmV3cGFzc3dvcmQ="},
+			shouldNotContain: []string{},
+		},
+	}
 
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := YamlString(baseYaml, headYaml, tt.options)
 
-		diffResult := results.StringDiff()
-		// Should not contain actual values
-		assert.NotContains(t, diffResult, "cGFzc3dvcmQxMjM=")
-		assert.NotContains(t, diffResult, "bmV3cGFzc3dvcmQ=")
-		// Should contain masked values
-		assert.Contains(t, diffResult, "++++++++++++++++")
-	})
+			assert.NoError(t, err)
+			assert.True(t, results.HasChanges())
 
-	t.Run("yaml diff with secret masking disabled", func(t *testing.T) {
-		opts := &Options{
-			DisableMaskSecrets: true,
-			Context:            3,
-		}
-		results, err := YamlString(baseYaml, headYaml, opts)
+			diffResult := results.StringDiff()
 
-		assert.NoError(t, err)
-		assert.True(t, results.HasChanges())
+			for _, expected := range tt.shouldContain {
+				assert.Contains(t, diffResult, expected)
+			}
 
-		diffResult := results.StringDiff()
-		// Should contain actual values when masking is disabled
-		assert.Contains(t, diffResult, "cGFzc3dvcmQxMjM=")
-		assert.Contains(t, diffResult, "bmV3cGFzc3dvcmQ=")
-	})
+			for _, notExpected := range tt.shouldNotContain {
+				assert.NotContains(t, diffResult, notExpected)
+			}
+		})
+	}
 }
 
 func TestSecretMaskingEdgeCases(t *testing.T) {
-	t.Run("secret with non-string values in data", func(t *testing.T) {
-		secretWithNumbers := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "Secret",
-				"metadata": map[string]any{
-					"name":      "number-secret",
-					"namespace": "default",
-				},
-				"type": "Opaque",
-				"data": map[string]any{
-					"number": 123,
-					"string": "dmFsdWU=",
-				},
+	secretWithNumbers := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "number-secret",
+				"namespace": "default",
 			},
-		}
-
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{secretWithNumbers}, []*unstructured.Unstructured{secretWithNumbers}, opts)
-
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-	})
-
-	t.Run("secret without data or stringData fields", func(t *testing.T) {
-		secretWithoutData := &unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "v1",
-				"kind":       "Secret",
-				"metadata": map[string]any{
-					"name":      "no-data-secret",
-					"namespace": "default",
-				},
-				"type": "Opaque",
+			"type": "Opaque",
+			"data": map[string]any{
+				"number": 123,
+				"string": "dmFsdWU=",
 			},
-		}
+		},
+	}
 
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{secretWithoutData}, []*unstructured.Unstructured{secretWithoutData}, opts)
+	secretWithoutData := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "no-data-secret",
+				"namespace": "default",
+			},
+			"type": "Opaque",
+		},
+	}
 
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-	})
+	tests := []struct {
+		name          string
+		baseObjects   []*unstructured.Unstructured
+		headObjects   []*unstructured.Unstructured
+		options       *Options
+		expectChanges bool
+	}{
+		{
+			name:          "secret with non-string values in data",
+			baseObjects:   []*unstructured.Unstructured{secretWithNumbers},
+			headObjects:   []*unstructured.Unstructured{secretWithNumbers},
+			options:       DefaultOptions(),
+			expectChanges: false,
+		},
+		{
+			name:          "secret without data or stringData fields",
+			baseObjects:   []*unstructured.Unstructured{secretWithoutData},
+			headObjects:   []*unstructured.Unstructured{secretWithoutData},
+			options:       DefaultOptions(),
+			expectChanges: false,
+		},
+		{
+			name:          "handles nil objects gracefully",
+			baseObjects:   []*unstructured.Unstructured{nil},
+			headObjects:   []*unstructured.Unstructured{nil},
+			options:       DefaultOptions(),
+			expectChanges: false,
+		},
+	}
 
-	t.Run("handles nil objects gracefully", func(t *testing.T) {
-		opts := DefaultOptions()
-		results, err := Objects([]*unstructured.Unstructured{nil}, []*unstructured.Unstructured{nil}, opts)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := Objects(tt.baseObjects, tt.headObjects, tt.options)
 
-		assert.NoError(t, err)
-		assert.False(t, results.HasChanges())
-	})
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectChanges, results.HasChanges())
+		})
+	}
 
 	t.Run("secret mask function with nil input", func(t *testing.T) {
 		masked := maskSecretData(nil)
