@@ -22,6 +22,7 @@ func TestSummaryFlagE2E(t *testing.T) {
 			headFile:   "basic/test-head.yaml",
 			expectDiff: true,
 			expected: []string{
+				"Changed:",
 				"Deployment/default/frontend-app",
 				"Deployment/default/backend-app",
 				"ConfigMap/default/app-config",
@@ -51,6 +52,7 @@ func TestSummaryFlagE2E(t *testing.T) {
 			headFile:   "basic/secret-with-data-head.yaml",
 			expectDiff: true,
 			expected: []string{
+				"Changed:",
 				"Secret/default/test-secret",
 			},
 			notExpected: []string{
@@ -104,6 +106,7 @@ func TestSummaryFlagWithFiltersE2E(t *testing.T) {
 			args:       []string{"--summary", "--exclude-kinds", "Deployment"},
 			expectDiff: true,
 			expected: []string{
+				"Changed:",
 				"Service/test-service",
 			},
 			notExpected: []string{
@@ -117,6 +120,7 @@ func TestSummaryFlagWithFiltersE2E(t *testing.T) {
 			args:       []string{"--summary", "--label", "app=nginx"},
 			expectDiff: true,
 			expected: []string{
+				"Changed:",
 				"Deployment/default/frontend-app",
 				"ConfigMap/default/app-config",
 			},
@@ -175,8 +179,9 @@ func TestSummaryFlagOutputFormat(t *testing.T) {
 		"replicas: 2",
 	})
 
-	// Summary should only contain resource names
+	// Summary should only contain resource names with section header
 	assertDiffOutput(t, summaryResult, []string{
+		"Changed:",
 		"Deployment/default/frontend-app",
 		"Deployment/default/backend-app",
 		"ConfigMap/default/app-config",
@@ -197,5 +202,5 @@ func TestSummaryFlagOutputFormat(t *testing.T) {
 	summaryLines := len(strings.Split(strings.TrimSpace(summaryResult.Output), "\n"))
 
 	assert.Greater(t, fullLines, 10, "Full diff should have many lines")
-	assert.Equal(t, 3, summaryLines, "Summary should have exactly 3 lines for 3 changed resources")
+	assert.Equal(t, 4, summaryLines, "Summary should have exactly 4 lines (1 header + 3 changed resources)")
 }
