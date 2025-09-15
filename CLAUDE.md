@@ -48,6 +48,32 @@ go test ./pkg/parser -v
 go test . -v
 ```
 
+## E2E Testing
+
+```bash
+# Build and run e2e tests
+make test-e2e
+
+# Run e2e tests (quick)
+make test-e2e-quick
+
+# Run all tests (unit + e2e)
+make test-all
+```
+
+## Tool Installation
+
+The Makefile includes automatic tool installation. Tools are installed in `./bin/` directory and include:
+- goimports: Import formatting
+- staticcheck: Static analysis
+- golint: Linting
+- ineffassign: Ineffectual assignment detection
+- errcheck: Error checking
+- misspell: Spell checking
+- gosec: Security scanning
+- revive: Linting with .revive.toml configuration
+- gotestsum: Enhanced test output
+
 ## Code Architecture
 
 ### Package Structure
@@ -63,34 +89,51 @@ go test . -v
    - Uses `k8s.io/apimachinery/pkg/util/yaml.NewYAMLOrJSONDecoder`
 
 2. **Diff Engine (`pkg/diff/diff.go`)**:
-   - `DiffObjects()`: Main diffing function that compares two sets of K8s objects
-   - `DiffYaml()` and `DiffYamlString()`: Convenience wrappers for YAML input
+   - `Objects()`: Main diffing function that compares two sets of K8s objects
+   - `Yaml()` and `YamlString()`: Convenience wrappers for YAML input
    - `FilterResources()`: Applies label selectors, annotation selectors, and kind exclusions
    - Uses `github.com/pmezard/go-difflib/difflib` for unified diff output
+   - Returns: (diff string, changed resources []string, has differences bool, error)
 
 3. **CLI (`cmd/k8s-yaml-diff/main.go`)**:
    - Cobra-based CLI with `diff` and `version` subcommands
-   - Supports flags: `--exclude-kinds`, `--label`, `--annotation`, `--context`
+   - Supports flags: `--exclude-kinds`, `--label`, `--annotation`, `--context`, `--disable-masking-secret`
    - Returns exit code 1 when differences found (standard diff behavior)
+   - Version information is injected at build time via ldflags
 
 ### Key Data Flow
 
 1. Parse YAML files into `[]*unstructured.Unstructured` using parser package
-2. Apply filtering based on `DiffOptions` (exclude kinds, label/annotation selectors)
+2. Apply filtering based on `Options` (exclude kinds, label/annotation selectors)
 3. Convert objects to `map[kube.ResourceKey]objBaseHead` for comparison
 4. Generate unified diff using go-difflib for each changed resource
 5. Return formatted diff string with resource headers
 
 ### Default Filtering Behavior
 
-- Excludes `Workflow` resources by default
+- No kinds excluded by default (when ExcludeKinds is explicitly empty)
 - Supports label selector filtering (exact match)
 - Supports annotation selector filtering (exact match)
 - Context lines in diff output default to 3
 
+### Secret Masking
+
+- Secret data values are masked by default in diff output for security
+- Uses consistent masking: same values get identical masks, different values get different masks
+- Masks both `data` (base64) and `stringData` (plain text) fields
+- Can be disabled with `--disable-masking-secret` flag
+- Implementation follows ArgoCD gitops-engine approach
+
+### Exit Codes
+
+- `0`: No differences found
+- `1`: Differences found (standard diff behavior)
+- `2`: Error occurred (e.g., file not found, parsing error)
+
 ### Testing
 
-- Tests are located in `diff_test.go` at project root
+- Unit tests are located in `pkg/diff/diff_test.go` and `pkg/parser/parser_test.go`
+- E2E tests are in `testing/e2e/` directory with various scenarios
 - Uses `github.com/stretchr/testify/assert` for assertions
 - Covers filtering options, diff scenarios, and edge cases
 - Test data uses unstructured objects with various K8s resource types

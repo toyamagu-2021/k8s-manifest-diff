@@ -5,9 +5,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/argoproj/gitops-engine/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+// formatResourceKey formats a ResourceKey for testing comparison
+func formatResourceKey(key kube.ResourceKey) string {
+	if key.Namespace != "" {
+		return fmt.Sprintf("%s/%s/%s", key.Kind, key.Namespace, key.Name)
+	}
+	return fmt.Sprintf("%s/%s", key.Kind, key.Name)
+}
 
 func TestLabelSelectorFiltering(t *testing.T) {
 	// Create test objects with different labels
@@ -278,13 +287,19 @@ func TestObjectsWithLabelSelector(t *testing.T) {
 			Context: 3,
 		}
 
-		diffResult, hasDiff, err := Objects(base, head, opts)
+		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "ConfigMap")
 		assert.Contains(t, diffResult, "old-value")
 		assert.Contains(t, diffResult, "new-value")
 		assert.NotContains(t, diffResult, "excluded-config")
+
+		// Check changed resources list
+		assert.Equal(t, 1, len(changedResources))
+		expected := "ConfigMap/default/config"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("diff with non-matching label selector", func(t *testing.T) {
@@ -295,10 +310,11 @@ func TestObjectsWithLabelSelector(t *testing.T) {
 			Context: 3,
 		}
 
-		diffResult, hasDiff, err := Objects(base, head, opts)
+		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
 		assert.Equal(t, "", diffResult)
+		assert.Equal(t, 0, len(changedResources))
 	})
 }
 
@@ -326,31 +342,38 @@ data:
 `
 
 	t.Run("diff with changes", func(t *testing.T) {
-		diffResult, hasDiff, err := YamlString(baseYaml, headYaml, nil)
+		diffResult, changedResources, hasDiff, err := YamlString(baseYaml, headYaml, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "ConfigMap")
 		assert.Contains(t, diffResult, "old-value")
 		assert.Contains(t, diffResult, "new-value")
+
+		// Check changed resources list
+		assert.Equal(t, 1, len(changedResources))
+		expected := "ConfigMap/default/test-config"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("no diff when identical", func(t *testing.T) {
-		diffResult, hasDiff, err := YamlString(baseYaml, baseYaml, nil)
+		diffResult, changedResources, hasDiff, err := YamlString(baseYaml, baseYaml, nil)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
 		assert.Equal(t, "", diffResult)
+		assert.Equal(t, 0, len(changedResources))
 	})
 
 	t.Run("error on invalid base yaml", func(t *testing.T) {
 		invalidYaml := `invalid: yaml: structure`
-		_, _, err := YamlString(invalidYaml, headYaml, nil)
+		_, _, _, err := YamlString(invalidYaml, headYaml, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse base YAML")
 	})
 
 	t.Run("error on invalid head yaml", func(t *testing.T) {
 		invalidYaml := `invalid: yaml: structure`
-		_, _, err := YamlString(baseYaml, invalidYaml, nil)
+		_, _, _, err := YamlString(baseYaml, invalidYaml, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse head YAML")
 	})
@@ -385,22 +408,29 @@ spec:
 		baseReader := strings.NewReader(baseYaml)
 		headReader := strings.NewReader(headYaml)
 
-		diffResult, hasDiff, err := Yaml(baseReader, headReader, nil)
+		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "Pod")
 		assert.Contains(t, diffResult, "nginx:1.20")
 		assert.Contains(t, diffResult, "nginx:1.21")
+
+		// Check changed resources list
+		assert.Equal(t, 1, len(changedResources))
+		expected := "Pod/default/test-pod"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("no diff when identical", func(t *testing.T) {
 		baseReader := strings.NewReader(baseYaml)
 		headReader := strings.NewReader(baseYaml)
 
-		diffResult, hasDiff, err := Yaml(baseReader, headReader, nil)
+		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
 		assert.Equal(t, "", diffResult)
+		assert.Equal(t, 0, len(changedResources))
 	})
 
 	t.Run("multiple objects in yaml", func(t *testing.T) {
@@ -439,23 +469,35 @@ data:
 		baseReader := strings.NewReader(multiYamlBase)
 		headReader := strings.NewReader(multiYamlHead)
 
-		diffResult, hasDiff, err := Yaml(baseReader, headReader, nil)
+		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "config2")
 		assert.Contains(t, diffResult, "value2")
 		assert.Contains(t, diffResult, "updated-value2")
 		assert.NotContains(t, diffResult, "config1")
+
+		// Check changed resources list - only config2 should be changed
+		assert.Equal(t, 1, len(changedResources))
+		expected := "ConfigMap/config2"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("empty yaml", func(t *testing.T) {
 		baseReader := strings.NewReader("")
 		headReader := strings.NewReader(headYaml)
 
-		diffResult, hasDiff, err := Yaml(baseReader, headReader, nil)
+		diffResult, changedResources, hasDiff, err := Yaml(baseReader, headReader, nil)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "test-pod")
+
+		// Check changed resources list - new resource added
+		assert.Equal(t, 1, len(changedResources))
+		expected := "Pod/default/test-pod"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 }
 
@@ -496,7 +538,7 @@ func TestSecretMasking(t *testing.T) {
 
 	t.Run("masks secret values by default", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
+		diffResult, changedResources, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
@@ -509,11 +551,17 @@ func TestSecretMasking(t *testing.T) {
 
 		// Should contain masked values with + symbols
 		assert.Contains(t, diffResult, "++++++++++++++++")
+
+		// Check changed resources list
+		assert.Equal(t, 1, len(changedResources))
+		expected := "Secret/default/test-secret"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("same values get same mask, different values get different masks", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
@@ -531,7 +579,7 @@ func TestSecretMasking(t *testing.T) {
 			DisableMaskSecrets: true,
 			Context:            3,
 		}
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{baseSecret}, []*unstructured.Unstructured{headSecret}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
@@ -559,7 +607,7 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithStringData}, []*unstructured.Unstructured{secretWithStringData}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithStringData}, []*unstructured.Unstructured{secretWithStringData}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff) // Same object should not have diff
@@ -582,7 +630,7 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{configMap}, []*unstructured.Unstructured{configMap}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{configMap}, []*unstructured.Unstructured{configMap}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
@@ -622,7 +670,7 @@ func TestSecretMasking(t *testing.T) {
 		baseObjects := []*unstructured.Unstructured{baseSecret, configMapBase}
 		headObjects := []*unstructured.Unstructured{headSecret, configMapHead}
 
-		diffResult, hasDiff, err := Objects(baseObjects, headObjects, opts)
+		diffResult, _, hasDiff, err := Objects(baseObjects, headObjects, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
@@ -650,7 +698,7 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{emptySecret}, []*unstructured.Unstructured{emptySecret}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{emptySecret}, []*unstructured.Unstructured{emptySecret}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
@@ -675,7 +723,7 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNil}, []*unstructured.Unstructured{secretWithNil}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNil}, []*unstructured.Unstructured{secretWithNil}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
@@ -720,7 +768,7 @@ func TestSecretMasking(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{mixedSecretBase}, []*unstructured.Unstructured{mixedSecretHead}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{mixedSecretBase}, []*unstructured.Unstructured{mixedSecretHead}, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
@@ -771,11 +819,11 @@ func TestSecretMasking(t *testing.T) {
 		opts := DefaultOptions()
 
 		// First diff operation
-		diff1, _, err1 := Objects([]*unstructured.Unstructured{secret1}, []*unstructured.Unstructured{secret1}, opts)
+		diff1, _, _, err1 := Objects([]*unstructured.Unstructured{secret1}, []*unstructured.Unstructured{secret1}, opts)
 		assert.NoError(t, err1)
 
 		// Second diff operation with same value
-		diff2, _, err2 := Objects([]*unstructured.Unstructured{secret2}, []*unstructured.Unstructured{secret2}, opts)
+		diff2, _, _, err2 := Objects([]*unstructured.Unstructured{secret2}, []*unstructured.Unstructured{secret2}, opts)
 		assert.NoError(t, err2)
 
 		// The same value should get the same mask across different operations
@@ -827,7 +875,7 @@ data:
 
 	t.Run("yaml diff with secret masking enabled", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := YamlString(baseYAML, headYAML, opts)
+		diffResult, _, hasDiff, err := YamlString(baseYAML, headYAML, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
@@ -849,7 +897,7 @@ data:
 			DisableMaskSecrets: true,
 			Context:            3,
 		}
-		diffResult, hasDiff, err := YamlString(baseYAML, headYAML, opts)
+		diffResult, _, hasDiff, err := YamlString(baseYAML, headYAML, opts)
 
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
@@ -885,7 +933,7 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNonString}, []*unstructured.Unstructured{secretWithNonString}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithNonString}, []*unstructured.Unstructured{secretWithNonString}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff) // Same object should not have diff
@@ -906,7 +954,7 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 		}
 
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithoutData}, []*unstructured.Unstructured{secretWithoutData}, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{secretWithoutData}, []*unstructured.Unstructured{secretWithoutData}, opts)
 
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
@@ -935,7 +983,7 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 		baseObjects := []*unstructured.Unstructured{nil, nonNilSecret}
 		headObjects := []*unstructured.Unstructured{nonNilSecret}
 
-		diffResult, hasDiff, err := Objects(baseObjects, headObjects, opts)
+		diffResult, _, hasDiff, err := Objects(baseObjects, headObjects, opts)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff) // Should not have diff since the non-nil objects are the same
 		assert.Equal(t, "", diffResult)
@@ -990,43 +1038,62 @@ func TestObjects(t *testing.T) {
 		head := []*unstructured.Unstructured{&obj}
 		base := []*unstructured.Unstructured{&obj}
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects(base, head, opts)
+		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.False(t, hasDiff)
 		assert.Equal(t, "", diffResult)
+		assert.Equal(t, 0, len(changedResources))
 	})
 
 	t.Run("exists only head", func(t *testing.T) {
 		head := []*unstructured.Unstructured{&obj}
 		base := []*unstructured.Unstructured{}
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects(base, head, opts)
+		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		fmt.Print(diffResult)
 		assert.True(t, strings.Contains(diffResult, "===== /Pod namespace/test ======"))
 		assert.True(t, strings.Contains(diffResult, "apiVersion: v1"))
 		assert.True(t, strings.Contains(diffResult, "kind: Pod"))
+
+		// Check changed resources list - new resource added
+		assert.Equal(t, 1, len(changedResources))
+		expected := "Pod/namespace/test"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("exists only base", func(t *testing.T) {
 		head := []*unstructured.Unstructured{}
 		base := []*unstructured.Unstructured{&obj}
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects(base, head, opts)
+		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.True(t, strings.Contains(diffResult, "===== /Pod namespace/test ======"))
+
+		// Check changed resources list - resource deleted
+		assert.Equal(t, 1, len(changedResources))
+		expected := "Pod/namespace/test"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 
 	t.Run("workflow excluded by default", func(t *testing.T) {
 		head := []*unstructured.Unstructured{&obj}
 		base := []*unstructured.Unstructured{}
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects(base, head, opts)
+		diffResult, changedResources, hasDiff, err := Objects(base, head, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "Pod")
+
+		// Check changed resources list
+		assert.Equal(t, 1, len(changedResources))
+		expected := "Pod/namespace/test"
+		actual := formatResourceKey(changedResources[0])
+		assert.Equal(t, expected, actual)
 	})
 }
 
@@ -1080,7 +1147,7 @@ func TestDiffOptionsFiltering(t *testing.T) {
 
 	t.Run("default options include all objects", func(t *testing.T) {
 		opts := DefaultOptions()
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "ConfigMap")
@@ -1093,7 +1160,7 @@ func TestDiffOptionsFiltering(t *testing.T) {
 		opts := &Options{
 			ExcludeKinds: []string{},
 		}
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.Contains(t, diffResult, "ConfigMap")
@@ -1106,7 +1173,7 @@ func TestDiffOptionsFiltering(t *testing.T) {
 		opts := &Options{
 			ExcludeKinds: []string{"ConfigMap", "Secret"},
 		}
-		diffResult, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
+		diffResult, _, hasDiff, err := Objects([]*unstructured.Unstructured{}, objects, opts)
 		assert.NoError(t, err)
 		assert.True(t, hasDiff)
 		assert.NotContains(t, diffResult, "ConfigMap")
@@ -1183,8 +1250,14 @@ func TestObjectsWithNilOptions(t *testing.T) {
 	head := []*unstructured.Unstructured{&obj}
 	base := []*unstructured.Unstructured{}
 
-	diffResult, hasDiff, err := Objects(base, head, nil)
+	diffResult, changedResources, hasDiff, err := Objects(base, head, nil)
 	assert.NoError(t, err)
 	assert.True(t, hasDiff)
 	assert.Contains(t, diffResult, "ConfigMap")
+
+	// Check changed resources list
+	assert.Equal(t, 1, len(changedResources))
+	expected := "ConfigMap/test/config"
+	actual := formatResourceKey(changedResources[0])
+	assert.Equal(t, expected, actual)
 }

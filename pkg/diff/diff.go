@@ -42,32 +42,32 @@ type objBaseHead struct {
 }
 
 // YamlString compares two YAML strings and returns the diff
-// Returns: (diff string, has differences bool, error)
-func YamlString(baseYaml, headYaml string, opts *Options) (string, bool, error) {
+// Returns: (diff string, changed resources []kube.ResourceKey, has differences bool, error)
+func YamlString(baseYaml, headYaml string, opts *Options) (string, []kube.ResourceKey, bool, error) {
 	baseReader := strings.NewReader(baseYaml)
 	headReader := strings.NewReader(headYaml)
 	return Yaml(baseReader, headReader, opts)
 }
 
 // Yaml compares YAML from two io.Reader sources and returns the diff
-// Returns: (diff string, has differences bool, error)
-func Yaml(baseReader, headReader io.Reader, opts *Options) (string, bool, error) {
+// Returns: (diff string, changed resources []kube.ResourceKey, has differences bool, error)
+func Yaml(baseReader, headReader io.Reader, opts *Options) (string, []kube.ResourceKey, bool, error) {
 	baseObjects, err := parser.ParseYAML(baseReader)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to parse base YAML: %w", err)
+		return "", nil, false, fmt.Errorf("failed to parse base YAML: %w", err)
 	}
 
 	headObjects, err := parser.ParseYAML(headReader)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to parse head YAML: %w", err)
+		return "", nil, false, fmt.Errorf("failed to parse head YAML: %w", err)
 	}
 
 	return Objects(baseObjects, headObjects, opts)
 }
 
 // Objects compares two sets of Kubernetes objects and returns the diff
-// Returns: (diff string, has differences bool, error)
-func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, bool, error) {
+// Returns: (diff string, changed resources []kube.ResourceKey, has differences bool, error)
+func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, []kube.ResourceKey, bool, error) {
 	if opts == nil {
 		opts = DefaultOptions()
 	}
@@ -77,6 +77,7 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, bo
 	objMap := parseObjsToMap(base, head)
 	foundDiff := false
 	diff := ""
+	var changedResources []kube.ResourceKey
 
 	for k, v := range objMap {
 		if reflect.DeepEqual(v.base, v.head) {
@@ -86,12 +87,15 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (string, bo
 		foundDiff = true
 		diffStr, code, err := getDiffStr(k.Name, v.head, v.base, opts)
 		if code > 1 {
-			return "", false, err
+			return "", nil, false, err
 		}
 		header := fmt.Sprintf("===== %s/%s %s/%s ======\n", k.Group, k.Kind, k.Namespace, k.Name)
 		diff += header + diffStr
+
+		// Add ResourceKey to changed resources list
+		changedResources = append(changedResources, k)
 	}
-	return diff, foundDiff, nil
+	return diff, changedResources, foundDiff, nil
 }
 
 // FilterResources removes resources based on the provided options

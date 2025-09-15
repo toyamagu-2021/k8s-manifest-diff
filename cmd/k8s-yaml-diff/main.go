@@ -24,6 +24,7 @@ var (
 	annotationSelectors  []string
 	context              int
 	disableMaskingSecret bool
+	summary              bool
 )
 
 var rootCmd = &cobra.Command{
@@ -112,13 +113,26 @@ Supports filtering options to exclude specific resource types.`,
 		}
 
 		// Perform diff
-		diffResult, hasDiff, err := diff.Objects(baseObjs, headObjs, opts)
+		diffResult, changedResources, hasDiff, err := diff.Objects(baseObjs, headObjs, opts)
 		if err != nil {
 			return fmt.Errorf("failed to diff objects: %w", err)
 		}
 
 		if hasDiff {
-			fmt.Print(diffResult)
+			if summary {
+				// Output only the list of changed resources
+				for _, resource := range changedResources {
+					// Format ResourceKey as string for output
+					resourceID := fmt.Sprintf("%s/%s", resource.Kind, resource.Name)
+					if resource.Namespace != "" {
+						resourceID = fmt.Sprintf("%s/%s/%s", resource.Kind, resource.Namespace, resource.Name)
+					}
+					fmt.Println(resourceID)
+				}
+			} else {
+				// Output the full diff
+				fmt.Print(diffResult)
+			}
 			os.Exit(1)
 		}
 		fmt.Println("No differences found")
@@ -143,6 +157,7 @@ func init() {
 	diffCmd.Flags().StringSliceVar(&annotationSelectors, "annotation", []string{}, "Annotation selector to filter resources (e.g., 'app.kubernetes.io/managed-by=helm', 'deployment.category=web'). Can be specified multiple times.")
 	diffCmd.Flags().IntVar(&context, "context", 3, "Number of context lines in diff output")
 	diffCmd.Flags().BoolVar(&disableMaskingSecret, "disable-masking-secret", false, "Disable masking of Secret data values in diff output")
+	diffCmd.Flags().BoolVar(&summary, "summary", false, "Output only the list of changed resources instead of full diff")
 
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(versionCmd)
