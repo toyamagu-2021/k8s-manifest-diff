@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-app
+  namespace: default
+  labels:
+    app: nginx
+    tier: frontend
+    environment: production
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    app.kubernetes.io/managed-by: "helm"
+    deployment.category: "web"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.20
+        ports:
+        - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-app
+  namespace: default
+  labels:
+    app: api
+    tier: backend
+    environment: production
+  annotations:
+    deployment.kubernetes.io/revision: "2"
+    app.kubernetes.io/managed-by: "kubectl"
+    deployment.category: "api"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - name: api
+        image: myapi:1.0
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+  labels:
+    app: nginx
+    tier: frontend
+    environment: production
+  annotations:
+    app.kubernetes.io/managed-by: "helm"
+    config.category: "web"
+data:
+  config.yaml: |
+    debug: false
+    port: 80
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secret
+  namespace: default
+  labels:
+    app: database
+    environment: production
+  annotations:
+    app.kubernetes.io/managed-by: "kubectl"
+    secret.category: "database"
+data:
+  username: dXNlcg== # gitleaks:allow
+  password: cGFzc3dvcmQ= # gitleaks:allow

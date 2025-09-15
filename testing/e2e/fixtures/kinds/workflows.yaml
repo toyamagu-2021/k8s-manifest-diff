@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: test-workflow
+  labels:
+    app: test
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    steps:
+    - - name: step1
+        template: hello
+  - name: hello
+    container:
+      image: alpine:latest
+      command: ["echo", "Hello World"]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: another-workflow
+  labels:
+    app: test
+spec:
+  entrypoint: process
+  templates:
+  - name: process
+    container:
+      image: busybox:latest
+      command: ["echo", "Processing"]

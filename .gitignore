@@ -30,3 +30,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+k8s-yaml-diff
+/dist
+/bin
+.claude/settings.local.json
