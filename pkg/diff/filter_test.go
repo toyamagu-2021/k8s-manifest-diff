@@ -278,53 +278,53 @@ func TestFilterResources_AnnotationSelector(t *testing.T) {
 	objects := []*unstructured.Unstructured{frontendObj, backendObj, stagingObj, noAnnotationsObj}
 
 	tests := []struct {
-		name                string
-		annotationSelector  map[string]string
-		expectedCount       int
-		expectedNames       []string
-		notExpectedNames    []string
+		name               string
+		annotationSelector map[string]string
+		expectedCount      int
+		expectedNames      []string
+		notExpectedNames   []string
 	}{
 		{
-			name:                "managed-by helm selector",
-			annotationSelector:  map[string]string{"app.kubernetes.io/managed-by": "helm"},
-			expectedCount:       2,
-			expectedNames:       []string{"frontend-app", "staging-config"},
-			notExpectedNames:    []string{"backend-app", "secret"},
+			name:               "managed-by helm selector",
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "helm"},
+			expectedCount:      2,
+			expectedNames:      []string{"frontend-app", "staging-config"},
+			notExpectedNames:   []string{"backend-app", "secret"},
 		},
 		{
-			name:                "multiple annotation selectors (AND logic)",
-			annotationSelector:  map[string]string{"app.kubernetes.io/managed-by": "helm", "environment": "production"},
-			expectedCount:       1,
-			expectedNames:       []string{"frontend-app"},
-			notExpectedNames:    []string{"backend-app", "staging-config", "secret"},
+			name:               "multiple annotation selectors (AND logic)",
+			annotationSelector: map[string]string{"app.kubernetes.io/managed-by": "helm", "environment": "production"},
+			expectedCount:      1,
+			expectedNames:      []string{"frontend-app"},
+			notExpectedNames:   []string{"backend-app", "staging-config", "secret"},
 		},
 		{
-			name:                "environment production selector",
-			annotationSelector:  map[string]string{"environment": "production"},
-			expectedCount:       2,
-			expectedNames:       []string{"frontend-app", "backend-app"},
-			notExpectedNames:    []string{"staging-config", "secret"},
+			name:               "environment production selector",
+			annotationSelector: map[string]string{"environment": "production"},
+			expectedCount:      2,
+			expectedNames:      []string{"frontend-app", "backend-app"},
+			notExpectedNames:   []string{"staging-config", "secret"},
 		},
 		{
-			name:                "deployment category web selector",
-			annotationSelector:  map[string]string{"deployment.category": "web"},
-			expectedCount:       1,
-			expectedNames:       []string{"frontend-app"},
-			notExpectedNames:    []string{"backend-app", "staging-config", "secret"},
+			name:               "deployment category web selector",
+			annotationSelector: map[string]string{"deployment.category": "web"},
+			expectedCount:      1,
+			expectedNames:      []string{"frontend-app"},
+			notExpectedNames:   []string{"backend-app", "staging-config", "secret"},
 		},
 		{
-			name:                "empty selector returns all objects",
-			annotationSelector:  nil,
-			expectedCount:       4,
-			expectedNames:       []string{"frontend-app", "backend-app", "staging-config", "secret"},
-			notExpectedNames:    []string{},
+			name:               "empty selector returns all objects",
+			annotationSelector: nil,
+			expectedCount:      4,
+			expectedNames:      []string{"frontend-app", "backend-app", "staging-config", "secret"},
+			notExpectedNames:   []string{},
 		},
 		{
-			name:                "non-matching selector returns empty",
-			annotationSelector:  map[string]string{"nonexistent": "value"},
-			expectedCount:       0,
-			expectedNames:       []string{},
-			notExpectedNames:    []string{"frontend-app", "backend-app", "staging-config", "secret"},
+			name:               "non-matching selector returns empty",
+			annotationSelector: map[string]string{"nonexistent": "value"},
+			expectedCount:      0,
+			expectedNames:      []string{},
+			notExpectedNames:   []string{"frontend-app", "backend-app", "staging-config", "secret"},
 		},
 	}
 
