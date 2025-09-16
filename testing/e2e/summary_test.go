@@ -202,5 +202,5 @@ func TestSummaryFlagOutputFormat(t *testing.T) {
 	summaryLines := len(strings.Split(strings.TrimSpace(summaryResult.Output), "\n"))
 
 	assert.Greater(t, fullLines, 10, "Full diff should have many lines")
-	assert.Equal(t, 6, summaryLines, "Summary should have exactly 6 lines (2 comment header lines + 1 section header + 3 changed resources)")
+	assert.Equal(t, 7, summaryLines, "Summary should have exactly 7 lines (3 comment header lines + 1 section header + 3 changed resources)")
 }
