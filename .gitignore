@@ -31,7 +31,6 @@ go.work.sum
 # .idea/
 # .vscode/
 
-k8s-manifest-diff
 /dist
 /bin
 .claude/settings.local.json

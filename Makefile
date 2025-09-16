@@ -18,17 +18,19 @@ BINARY_PATH=./cmd/k8s-manifest-diff
 
 # Tool paths
 BIN_DIR=$(CURDIR)/bin
+DIST_DIR=$(CURDIR)/dist
 
 # Build
 .PHONY: build
 build:
-	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) $(BINARY_PATH)
+	@mkdir -p $(DIST_DIR)
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) $(BINARY_PATH)
 
 # Clean
 .PHONY: clean
 clean:
 	$(GOCMD) clean
-	rm -f $(BINARY_NAME)
+	rm -rf $(DIST_DIR)
 	rm -rf $(BIN_DIR)
 
 # Dependencies
