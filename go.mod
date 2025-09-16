@@ -1,4 +1,4 @@
-module github.com/toyamagu-2021/k8s-yaml-diff
+module github.com/toyamagu-2021/k8s-manifest-diff
 
 go 1.25.0
 

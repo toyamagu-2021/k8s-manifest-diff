@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/toyamagu-2021/k8s-yaml-diff/pkg/parser"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/parser"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 

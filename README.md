@@ -1,4 +1,4 @@
-# k8s-yaml-diff
+# k8s-manifest-diff
 
 A CLI tool and Go library for parsing Kubernetes YAML/JSON manifests and computing diffs between sets of Kubernetes objects.
 
@@ -16,13 +16,13 @@ A CLI tool and Go library for parsing Kubernetes YAML/JSON manifests and computi
 ### Install CLI Tool
 
 ```bash
-go install github.com/toyamagu-2021/k8s-yaml-diff/cmd/k8s-yaml-diff@latest
+go install github.com/toyamagu-2021/k8s-manifest-diff/cmd/k8s-manifest-diff@latest
 ```
 
 ### Install Go Library
 
 ```bash
-go get github.com/toyamagu-2021/k8s-yaml-diff
+go get github.com/toyamagu-2021/k8s-manifest-diff
 ```
 
 ## CLI Usage
@@ -32,45 +32,45 @@ go get github.com/toyamagu-2021/k8s-yaml-diff
 Compare two Kubernetes YAML files:
 
 ```bash
-k8s-yaml-diff diff base.yaml head.yaml
+k8s-manifest-diff diff base.yaml head.yaml
 ```
 
 ### Filtering Options
 
 Exclude specific resource kinds:
 ```bash
-k8s-yaml-diff diff base.yaml head.yaml --exclude-kinds Job,CronJob,Pod
+k8s-manifest-diff diff base.yaml head.yaml --exclude-kinds Job,CronJob,Pod
 ```
 
 Filter by labels:
 ```bash
-k8s-yaml-diff diff base.yaml head.yaml --label app=nginx --label tier=frontend
+k8s-manifest-diff diff base.yaml head.yaml --label app=nginx --label tier=frontend
 ```
 
 Filter by annotations:
 ```bash
-k8s-yaml-diff diff base.yaml head.yaml --annotation app.kubernetes.io/managed-by=helm
+k8s-manifest-diff diff base.yaml head.yaml --annotation app.kubernetes.io/managed-by=helm
 ```
 
 Control diff context lines:
 ```bash
-k8s-yaml-diff diff base.yaml head.yaml --context 5
+k8s-manifest-diff diff base.yaml head.yaml --context 5
 ```
 
 Disable secret masking:
 ```bash
-k8s-yaml-diff diff base.yaml head.yaml --disable-masking-secret
+k8s-manifest-diff diff base.yaml head.yaml --disable-masking-secret
 ```
 
 Show only summary of changes:
 ```bash
-k8s-yaml-diff diff base.yaml head.yaml --summary
+k8s-manifest-diff diff base.yaml head.yaml --summary
 ```
 
 ### Version Information
 
 ```bash
-k8s-yaml-diff version
+k8s-manifest-diff version
 ```
 
 ### Exit Codes
@@ -90,7 +90,7 @@ package main
 
 import (
     "fmt"
-    "github.com/toyamagu-2021/k8s-yaml-diff/pkg/diff"
+    "github.com/toyamagu-2021/k8s-manifest-diff/pkg/diff"
 )
 
 func main() {
@@ -151,8 +151,8 @@ if results.HasChanges() {
 ## Build from Source
 
 ```bash
-git clone https://github.com/toyamagu-2021/k8s-yaml-diff
-cd k8s-yaml-diff
+git clone https://github.com/toyamagu-2021/k8s-manifest-diff
+cd k8s-manifest-diff
 make build
 ```
 
@@ -204,7 +204,7 @@ make test-all
 
 The project is organized into the following packages:
 
-- **`cmd/k8s-yaml-diff/`**: CLI application entry point with cobra-based commands
+- **`cmd/k8s-manifest-diff/`**: CLI application entry point with cobra-based commands
 - **`pkg/parser/`**: YAML/JSON parsing using k8s.io/apimachinery
 - **`pkg/diff/`**: Core diffing logic with filtering and secret masking
 - **`testing/e2e/`**: End-to-end test scenarios

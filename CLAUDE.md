@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-k8s-yaml-diff is a Go library and CLI tool for parsing Kubernetes YAML/JSON manifests and computing diffs between sets of Kubernetes objects. It supports flexible filtering options and is compatible with ArgoCD workflows.
+k8s-manifest-diff is a Go library and CLI tool for parsing Kubernetes YAML/JSON manifests and computing diffs between sets of Kubernetes objects. It supports flexible filtering options and is compatible with ArgoCD workflows.
 
 ## Build Commands
 
@@ -78,7 +78,7 @@ The Makefile includes automatic tool installation. Tools are installed in `./bin
 
 ### Package Structure
 
-- **`cmd/k8s-yaml-diff/`**: CLI application entry point with cobra-based command handling
+- **`cmd/k8s-manifest-diff/`**: CLI application entry point with cobra-based command handling
 - **`pkg/parser/`**: YAML/JSON parsing logic using k8s.io/apimachinery
 - **`pkg/diff/`**: Core diffing logic with filtering and comparison capabilities
 
@@ -95,7 +95,7 @@ The Makefile includes automatic tool installation. Tools are installed in `./bin
    - Uses `github.com/pmezard/go-difflib/difflib` for unified diff output
    - Returns Results type containing ResourceKey to Result mappings
 
-3. **CLI (`cmd/k8s-yaml-diff/main.go`)**:
+3. **CLI (`cmd/k8s-manifest-diff/main.go`)**:
    - Cobra-based CLI with `diff` and `version` subcommands
    - Supports flags: `--exclude-kinds`, `--label`, `--annotation`, `--context`, `--disable-masking-secret`, `--summary`
    - Returns exit code 1 when differences found (standard diff behavior)

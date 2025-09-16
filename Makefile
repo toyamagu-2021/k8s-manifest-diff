@@ -1,4 +1,4 @@
-# k8s-yaml-diff Makefile
+# k8s-manifest-diff Makefile
 
 # Version information
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -13,8 +13,8 @@ GOTEST=$(GOCMD) test
 GOMOD=$(GOCMD) mod
 GOFMT=gofmt
 GOVET=$(GOCMD) vet
-BINARY_NAME=k8s-yaml-diff
-BINARY_PATH=./cmd/k8s-yaml-diff
+BINARY_NAME=k8s-manifest-diff
+BINARY_PATH=./cmd/k8s-manifest-diff
 
 # Tool paths
 BIN_DIR=$(CURDIR)/bin
