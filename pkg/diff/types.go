@@ -74,15 +74,35 @@ type Statistics struct {
 	Unchanged int
 }
 
-// StringDiff returns a concatenated string of all diff results
+// StringDiff returns a concatenated string of all diff results with summary header
 func (dr Results) StringDiff() string {
-	var result string
+	var result strings.Builder
+
+	// Check if there are any changes that need diff output
+	hasDiffContent := false
 	for _, diffResult := range dr {
 		if diffResult.Diff != "" {
-			result += diffResult.Diff
+			hasDiffContent = true
+			break
 		}
 	}
-	return result
+
+	// Add summary content as comment header only if there are changes
+	if hasDiffContent {
+		summaryComments := dr.StringSummaryAsComments()
+		if summaryComments != "" {
+			result.WriteString(summaryComments)
+			result.WriteString("#\n")
+		}
+	}
+
+	// Add diff content
+	for _, diffResult := range dr {
+		if diffResult.Diff != "" {
+			result.WriteString(diffResult.Diff)
+		}
+	}
+	return result.String()
 }
 
 // StringSummary returns a summary string organized by change types: Unchanged, Changed, Create, Delete
@@ -97,10 +117,12 @@ func (dr Results) StringSummary() string {
 		return fmt.Sprintf("%s/%s", key.Kind, key.Name)
 	}
 
-	// Helper function to write a section
+	// Helper function to write a section with count and header comment
 	writeSection := func(title string, keys []ResourceKey) {
 		if len(keys) > 0 {
-			result.WriteString(fmt.Sprintf("%s:\n", title))
+			// Add section header comment
+			result.WriteString(fmt.Sprintf("# %s: %d resources\n", title, len(keys)))
+			result.WriteString(fmt.Sprintf("%s (%d):\n", title, len(keys)))
 			for _, key := range keys {
 				result.WriteString(fmt.Sprintf("  %s\n", formatResourceKey(key)))
 			}
@@ -108,13 +130,50 @@ func (dr Results) StringSummary() string {
 		}
 	}
 
+	// Get sections
+	unchangedKeys := dr.FilterUnchanged().GetResourceKeys()
+	changedKeys := dr.FilterChanged().GetResourceKeys()
+	createdKeys := dr.FilterCreated().GetResourceKeys()
+	deletedKeys := dr.FilterDeleted().GetResourceKeys()
+
+	// Only add comment header if there are any resources
+	stats := dr.GetStatistics()
+	if stats.Total > 0 {
+		result.WriteString(fmt.Sprintf("# Summary: %d total, %d changed, %d created, %d deleted, %d unchanged\n",
+			stats.Total, stats.Changed, stats.Created, stats.Deleted, stats.Unchanged))
+		result.WriteString("#\n")
+	}
+
 	// Use filtering methods to organize resources by change type
-	writeSection("Unchanged", dr.FilterUnchanged().GetResourceKeys())
-	writeSection("Changed", dr.FilterChanged().GetResourceKeys())
-	writeSection("Create", dr.FilterCreated().GetResourceKeys())
-	writeSection("Delete", dr.FilterDeleted().GetResourceKeys())
+	writeSection("Unchanged", unchangedKeys)
+	writeSection("Changed", changedKeys)
+	writeSection("Create", createdKeys)
+	writeSection("Delete", deletedKeys)
 
 	return strings.TrimRight(result.String(), "\n")
+}
+
+// StringSummaryAsComments returns the summary content formatted as comment lines
+func (dr Results) StringSummaryAsComments() string {
+	summaryContent := dr.StringSummary()
+	if summaryContent == "" {
+		return ""
+	}
+
+	var result strings.Builder
+	lines := strings.Split(summaryContent, "\n")
+	if lines == nil {
+		return ""
+	}
+
+	for _, line := range lines {
+		if line != "" {
+			result.WriteString(fmt.Sprintf("# %s\n", line))
+		} else {
+			result.WriteString("#\n")
+		}
+	}
+	return result.String()
 }
 
 // FilterByType returns a new Results containing only resources with the specified change type

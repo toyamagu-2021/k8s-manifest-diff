@@ -350,7 +350,7 @@ func TestResults_StringSummary(t *testing.T) {
 			name:    "mixed results summary",
 			results: results,
 			shouldContain: []string{
-				"Unchanged:", "Changed:", "Create:", "Delete:",
+				"Unchanged (1):", "Changed (2):", "Create (1):", "Delete (1):",
 				"Secret/default/secret1",
 				"Deployment/default/app1",
 				"Deployment/production/app2",
@@ -364,7 +364,7 @@ func TestResults_StringSummary(t *testing.T) {
 			name:    "unchanged only summary",
 			results: unchangedOnlyResults,
 			shouldContain: []string{
-				"Unchanged:",
+				"Unchanged (1):",
 				"Secret/default/secret1",
 			},
 			shouldNotContain: []string{

@@ -31,7 +31,7 @@ func TestContextLinesE2E(t *testing.T) {
 			contextLines:     0,
 			expectDiff:       true,
 			minExpectedLines: 3,  // At least the changed lines + headers
-			maxExpectedLines: 30, // Should be minimal but allow for actual output
+			maxExpectedLines: 35, // Should be minimal but allow for actual output
 		},
 		{
 			name:             "one context line",
