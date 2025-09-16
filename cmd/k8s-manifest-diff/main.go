@@ -1,4 +1,4 @@
-// Package main provides the k8s-yaml-diff CLI tool for comparing Kubernetes YAML manifests.
+// Package main provides the k8s-manifest-diff CLI tool for comparing Kubernetes YAML manifests.
 package main
 
 import (
@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/toyamagu-2021/k8s-yaml-diff/pkg/diff"
-	"github.com/toyamagu-2021/k8s-yaml-diff/pkg/parser"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/diff"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/parser"
 )
 
 var (
@@ -28,9 +28,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "k8s-yaml-diff",
+	Use:   "k8s-manifest-diff",
 	Short: "Compare Kubernetes YAML manifests",
-	Long: `k8s-yaml-diff is a tool for comparing Kubernetes YAML manifests.
+	Long: `k8s-manifest-diff is a tool for comparing Kubernetes YAML manifests.
 It can filter out specific resources like hooks, secrets, or custom kinds,
 and use custom diff commands for comparison.`,
 }
@@ -137,7 +137,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(_ *cobra.Command, _ []string) {
-		fmt.Printf("k8s-yaml-diff version %s\n", version)
+		fmt.Printf("k8s-manifest-diff version %s\n", version)
 		fmt.Printf("commit: %s\n", commit)
 		fmt.Printf("date: %s\n", date)
 	},

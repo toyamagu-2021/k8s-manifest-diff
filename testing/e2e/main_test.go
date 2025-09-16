@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	binaryName = "k8s-yaml-diff-e2e-test"
+	binaryName = "k8s-manifest-diff-e2e-test"
 	timeout    = 30 * time.Second
 )
 
@@ -23,7 +23,7 @@ var binaryPath string
 func TestMain(m *testing.M) {
 	// Build the binary
 	binaryPath = filepath.Join(".", binaryName)
-	cmd := exec.Command("go", "build", "-o", binaryPath, "../../cmd/k8s-yaml-diff")
+	cmd := exec.Command("go", "build", "-o", binaryPath, "../../cmd/k8s-manifest-diff")
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("Failed to build binary: %v\n", err)
 		os.Exit(1)
@@ -54,7 +54,7 @@ type CommandResult struct {
 	Error    error
 }
 
-// runDiffCommand executes the k8s-yaml-diff command with given args
+// runDiffCommand executes the k8s-manifest-diff command with given args
 func runDiffCommand(args ...string) CommandResult {
 	cmd := exec.Command(binaryPath, args...)
 	cmd.Dir = "."
