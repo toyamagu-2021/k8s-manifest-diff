@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/masking"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -480,25 +481,25 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 	}
 
 	t.Run("secret mask function with nil input", func(t *testing.T) {
-		masked := maskSecretData(nil)
+		masked := masking.MaskSecretData(nil)
 		assert.Nil(t, masked)
 	})
 
 	t.Run("isSecret function with various inputs", func(t *testing.T) {
-		assert.False(t, isSecret(nil))
+		assert.False(t, masking.IsSecret(nil))
 
 		nonSecret := &unstructured.Unstructured{
 			Object: map[string]any{
 				"kind": "ConfigMap",
 			},
 		}
-		assert.False(t, isSecret(nonSecret))
+		assert.False(t, masking.IsSecret(nonSecret))
 
 		secret := &unstructured.Unstructured{
 			Object: map[string]any{
 				"kind": "Secret",
 			},
 		}
-		assert.True(t, isSecret(secret))
+		assert.True(t, masking.IsSecret(secret))
 	})
 }
