@@ -1,4 +1,4 @@
-// Package masking provides functionality for masking sensitive data in Kubernetes secrets.
+// Package masking provides functionality for masking Kubernetes manifests.
 package masking
 
 import (
