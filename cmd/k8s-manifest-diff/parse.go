@@ -63,7 +63,7 @@ to exclude specific resource types or filter by labels/annotations.`,
 			}
 
 			// Process the file with filtering and masking options
-			maskedYaml, err := parser.Yaml(reader, opts)
+			results, err := parser.Yaml(reader, opts)
 			if err != nil {
 				if closeErr := reader.Close(); closeErr != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to close file %s: %v\n", file, closeErr)
@@ -81,7 +81,9 @@ to exclude specific resource types or filter by labels/annotations.`,
 			if len(args) > 1 {
 				fmt.Printf("# File: %s\n", file)
 			}
-			fmt.Print(maskedYaml)
+
+			// Use the String() method to convert results to YAML
+			fmt.Print(results.String())
 
 			// Add separator between files (except for the last one)
 			if i < len(args)-1 {
