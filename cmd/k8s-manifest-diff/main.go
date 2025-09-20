@@ -152,6 +152,7 @@ func init() {
 	diffCmd.Flags().BoolVar(&summary, "summary", false, "Output only the list of changed resources instead of full diff")
 
 	rootCmd.AddCommand(diffCmd)
+	rootCmd.AddCommand(parseCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 
