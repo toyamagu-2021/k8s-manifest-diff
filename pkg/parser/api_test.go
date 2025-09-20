@@ -118,23 +118,26 @@ data:
 
 			assert.NotEmpty(t, result)
 
+			// Convert Results to YAML string for verification
+			resultYAML := result.String()
+
 			if tt.expectMasked {
 				// Check that secret data is masked
 				for _, secretName := range tt.checkSecrets {
-					assert.Contains(t, result, secretName, "Secret name should be present")
+					assert.Contains(t, resultYAML, secretName, "Secret name should be present")
 					// Verify original values are not present
-					assert.NotContains(t, result, "cGFzc3dvcmQxMjM=", "Original base64 password should not be present")
-					assert.NotContains(t, result, "YWRtaW4=", "Original base64 username should not be present")
-					assert.NotContains(t, result, "plain-text-config", "Original plain text config should not be present")
-					assert.NotContains(t, result, "plain-text-token", "Original plain text token should not be present")
+					assert.NotContains(t, resultYAML, "cGFzc3dvcmQxMjM=", "Original base64 password should not be present")
+					assert.NotContains(t, resultYAML, "YWRtaW4=", "Original base64 username should not be present")
+					assert.NotContains(t, resultYAML, "plain-text-config", "Original plain text config should not be present")
+					assert.NotContains(t, resultYAML, "plain-text-token", "Original plain text token should not be present")
 					// Verify masks are present
-					assert.Contains(t, result, "+", "Masked values should contain + characters")
+					assert.Contains(t, resultYAML, "+", "Masked values should contain + characters")
 				}
 			}
 
 			// Verify YAML structure is maintained
-			assert.Contains(t, result, "apiVersion", "YAML structure should be maintained")
-			assert.Contains(t, result, "kind", "YAML structure should be maintained")
+			assert.Contains(t, resultYAML, "apiVersion", "YAML structure should be maintained")
+			assert.Contains(t, resultYAML, "kind", "YAML structure should be maintained")
 		})
 	}
 }
@@ -161,19 +164,22 @@ stringData:
 	assert.NoError(t, err)
 	assert.NotEmpty(t, result)
 
+	// Convert Results to YAML string for verification
+	resultYAML := result.String()
+
 	// Verify secret is masked
-	assert.Contains(t, result, "test-secret", "Secret name should be present")
-	assert.NotContains(t, result, "cGFzc3dvcmQxMjM=", "Original base64 password should not be present")
-	assert.NotContains(t, result, "YWRtaW4=", "Original base64 username should not be present")
-	assert.NotContains(t, result, "plain-text-config", "Original plain text config should not be present")
-	assert.Contains(t, result, "+", "Masked values should contain + characters")
+	assert.Contains(t, resultYAML, "test-secret", "Secret name should be present")
+	assert.NotContains(t, resultYAML, "cGFzc3dvcmQxMjM=", "Original base64 password should not be present")
+	assert.NotContains(t, resultYAML, "YWRtaW4=", "Original base64 username should not be present")
+	assert.NotContains(t, resultYAML, "plain-text-config", "Original plain text config should not be present")
+	assert.Contains(t, resultYAML, "+", "Masked values should contain + characters")
 
 	// Verify YAML structure is maintained
-	assert.Contains(t, result, "apiVersion: v1", "YAML structure should be maintained")
-	assert.Contains(t, result, "kind: Secret", "YAML structure should be maintained")
-	assert.Contains(t, result, "metadata:", "YAML structure should be maintained")
-	assert.Contains(t, result, "data:", "YAML structure should be maintained")
-	assert.Contains(t, result, "stringData:", "YAML structure should be maintained")
+	assert.Contains(t, resultYAML, "apiVersion: v1", "YAML structure should be maintained")
+	assert.Contains(t, resultYAML, "kind: Secret", "YAML structure should be maintained")
+	assert.Contains(t, resultYAML, "metadata:", "YAML structure should be maintained")
+	assert.Contains(t, resultYAML, "data:", "YAML structure should be maintained")
+	assert.Contains(t, resultYAML, "stringData:", "YAML structure should be maintained")
 }
 
 func TestObjects(t *testing.T) {
@@ -303,14 +309,25 @@ func TestObjects(t *testing.T) {
 			assert.NoError(t, err)
 
 			if tt.objects == nil {
-				assert.Nil(t, result)
+				assert.Empty(t, result)
 				return
 			}
 
 			assert.Len(t, result, len(tt.objects), "Result should have same length as input")
 
 			maskedCount := 0
-			for i, obj := range result {
+			originalObjectsByKey := make(map[ResourceKey]*unstructured.Unstructured)
+			for _, origObj := range tt.objects {
+				key := ResourceKey{
+					Name:      origObj.GetName(),
+					Namespace: origObj.GetNamespace(),
+					Group:     origObj.GetObjectKind().GroupVersionKind().Group,
+					Kind:      origObj.GetKind(),
+				}
+				originalObjectsByKey[key] = origObj
+			}
+
+			for key, obj := range result {
 				assert.NotNil(t, obj, "Result object should not be nil")
 
 				if masking.IsSecret(obj) {
@@ -331,11 +348,15 @@ func TestObjects(t *testing.T) {
 						}
 					}
 					// Verify original is not modified
-					assert.NotEqual(t, tt.objects[i], obj, "Original object should not be modified")
+					if origObj, exists := originalObjectsByKey[key]; exists {
+						assert.NotEqual(t, origObj, obj, "Original object should not be modified")
+					}
 				} else {
 					// For non-secrets, should be a deep copy
-					assert.Equal(t, tt.objects[i].GetKind(), obj.GetKind(), "Non-secret object kind should be preserved")
-					assert.NotSame(t, tt.objects[i], obj, "Non-secret object should be a copy")
+					if origObj, exists := originalObjectsByKey[key]; exists {
+						assert.Equal(t, origObj.GetKind(), obj.GetKind(), "Non-secret object kind should be preserved")
+						assert.NotSame(t, origObj, obj, "Non-secret object should be a copy")
+					}
 				}
 			}
 
@@ -386,11 +407,19 @@ func TestObjectsConsistency(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, result, 2)
 
-	// Get masked data from both secrets
-	data1, found, _ := unstructured.NestedMap(result[0].Object, "data")
+	// Get masked data from both secrets - need to iterate through results
+	var data1, data2 map[string]interface{}
+	resultSlice := make([]*unstructured.Unstructured, 0, len(result))
+	for _, obj := range result {
+		resultSlice = append(resultSlice, obj)
+	}
+
+	data1Map, found, _ := unstructured.NestedMap(resultSlice[0].Object, "data")
 	assert.True(t, found)
-	data2, found, _ := unstructured.NestedMap(result[1].Object, "data")
+	data1 = data1Map
+	data2Map, found, _ := unstructured.NestedMap(resultSlice[1].Object, "data")
 	assert.True(t, found)
+	data2 = data2Map
 
 	// Same values should get same masks
 	assert.Equal(t, data1["shared"], data2["shared"], "Same values should get identical masks")
@@ -481,14 +510,17 @@ stringData:
 			assert.NoError(t, err)
 			assert.NotEmpty(t, result)
 
+			// Convert Results to YAML string for verification
+			resultYAML := result.String()
+
 			// Verify secrets are masked
-			assert.Contains(t, result, "+", "Masked values should contain + characters")
+			assert.Contains(t, resultYAML, "+", "Masked values should contain + characters")
 			// Verify YAML structure is maintained
-			assert.Contains(t, result, "apiVersion", "YAML structure should be maintained")
-			assert.Contains(t, result, "kind", "YAML structure should be maintained")
+			assert.Contains(t, resultYAML, "apiVersion", "YAML structure should be maintained")
+			assert.Contains(t, resultYAML, "kind", "YAML structure should be maintained")
 			// Verify document separators are maintained for multiple documents
 			if strings.Contains(tt.input, "---") {
-				assert.Contains(t, result, "---", "Document separators should be maintained")
+				assert.Contains(t, resultYAML, "---", "Document separators should be maintained")
 			}
 		})
 	}
@@ -748,11 +780,11 @@ func TestObjectsWithFiltering(t *testing.T) {
 			assert.Len(t, result, tt.expectedCount, "Result count should match expected")
 
 			// Check that the expected kinds are present
-			actualKinds := make([]string, len(result))
+			actualKinds := make([]string, 0, len(result))
 			maskedCount := 0
-			for i, obj := range result {
+			for _, obj := range result {
 				assert.NotNil(t, obj, "Result object should not be nil")
-				actualKinds[i] = obj.GetKind()
+				actualKinds = append(actualKinds, obj.GetKind())
 
 				if masking.IsSecret(obj) && (tt.opts == nil || !tt.opts.DisableMaskingSecrets) {
 					maskedCount++
@@ -885,29 +917,25 @@ data:
 
 			assert.NotEmpty(t, result)
 
-			// Count document separators to estimate number of resources
-			docCount := strings.Count(result, "---") + 1
-			if strings.TrimSpace(result) == "" {
-				docCount = 0
-			}
+			// Check the actual number of resources in Results
+			assert.Len(t, result, tt.expectedResources, "Number of resources should match expected")
 
-			// Allow for slight variance due to YAML formatting
-			assert.True(t, docCount >= tt.expectedResources-1 && docCount <= tt.expectedResources+1,
-				"Document count should be around expected resources count, got %d, expected around %d", docCount, tt.expectedResources)
+			// Convert Results to YAML string for verification
+			resultYAML := result.String()
 
 			// Check presence of specific resources
 			if tt.shouldContainSecret {
-				assert.Contains(t, result, "kind: Secret", "Should contain Secret")
-				assert.Contains(t, result, "test-secret", "Should contain secret name")
+				assert.Contains(t, resultYAML, "kind: Secret", "Should contain Secret")
+				assert.Contains(t, resultYAML, "test-secret", "Should contain secret name")
 			} else {
-				assert.NotContains(t, result, "kind: Secret", "Should not contain Secret")
+				assert.NotContains(t, resultYAML, "kind: Secret", "Should not contain Secret")
 			}
 
 			if tt.shouldContainDeploy {
-				assert.Contains(t, result, "kind: Deployment", "Should contain Deployment")
-				assert.Contains(t, result, "test-deployment", "Should contain deployment name")
+				assert.Contains(t, resultYAML, "kind: Deployment", "Should contain Deployment")
+				assert.Contains(t, resultYAML, "test-deployment", "Should contain deployment name")
 			} else {
-				assert.NotContains(t, result, "kind: Deployment", "Should not contain Deployment")
+				assert.NotContains(t, resultYAML, "kind: Deployment", "Should not contain Deployment")
 			}
 		})
 	}
