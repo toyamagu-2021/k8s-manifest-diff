@@ -100,7 +100,7 @@ data:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := YamlString(tt.input)
+			result, err := YamlString(tt.input, nil)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -155,7 +155,7 @@ stringData:
   config: plain-text-config`
 
 	reader := strings.NewReader(secretYaml)
-	result, err := Yaml(reader)
+	result, err := Yaml(reader, nil)
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, result)
@@ -292,7 +292,7 @@ func TestObjects(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Objects(tt.objects)
+			result, err := Objects(tt.objects, nil)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -381,7 +381,7 @@ func TestObjectsConsistency(t *testing.T) {
 		},
 	}
 
-	result, err := Objects(objects)
+	result, err := Objects(objects, nil)
 	assert.NoError(t, err)
 	assert.Len(t, result, 2)
 
@@ -470,7 +470,7 @@ stringData:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := YamlString(tt.input)
+			result, err := YamlString(tt.input, nil)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -538,7 +538,7 @@ func TestYamlStringEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := YamlString(tt.input)
+			result, err := YamlString(tt.input, nil)
 
 			if tt.expectError {
 				assert.Error(t, err)

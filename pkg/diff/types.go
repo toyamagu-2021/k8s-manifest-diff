@@ -3,6 +3,8 @@ package diff
 import (
 	"fmt"
 	"strings"
+
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/filter"
 )
 
 // ResourceKey uniquely identifies a Kubernetes resource
@@ -324,22 +326,18 @@ func (dr Results) GetStatistics() Statistics {
 	return stats
 }
 
-// Options controls the diff behavior
+// Options controls the diff behavior with filtering and masking options
 type Options struct {
-	ExcludeKinds       []string          // List of Kinds to exclude from diff
-	LabelSelector      map[string]string // Label selector to filter resources (exact match)
-	AnnotationSelector map[string]string // Annotation selector to filter resources (exact match)
-	Context            int               // Number of context lines in diff output
-	DisableMaskSecrets bool              // Disable masking of secret values in diff output (default: false)
+	FilterOption          *filter.Option // Filtering options
+	Context               int            // Number of context lines in diff output
+	DisableMaskingSecrets bool           // Disable masking of secret values (default: false)
 }
 
 // DefaultOptions returns the default diff options
 func DefaultOptions() *Options {
 	return &Options{
-		ExcludeKinds:       nil,
-		LabelSelector:      nil,
-		AnnotationSelector: nil,
-		Context:            3,
-		DisableMaskSecrets: false,
+		FilterOption:          filter.DefaultOption(),
+		Context:               3,
+		DisableMaskingSecrets: false,
 	}
 }

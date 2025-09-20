@@ -1,4 +1,5 @@
-package diff
+// Package filter provides filtering functionality for Kubernetes resources.
+package filter
 
 import (
 	"slices"
@@ -6,8 +7,28 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// FilterResources removes resources based on the provided options
-func FilterResources(objs []*unstructured.Unstructured, opts *Options) []*unstructured.Unstructured {
+// Option controls the filtering behavior for Kubernetes resources
+type Option struct {
+	ExcludeKinds       []string          // List of Kinds to exclude from filtering
+	LabelSelector      map[string]string // Label selector to filter resources (exact match)
+	AnnotationSelector map[string]string // Annotation selector to filter resources (exact match)
+}
+
+// DefaultOption returns the default filtering options
+func DefaultOption() *Option {
+	return &Option{
+		ExcludeKinds:       nil,
+		LabelSelector:      nil,
+		AnnotationSelector: nil,
+	}
+}
+
+// Resources removes resources based on the provided filter options
+func Resources(objs []*unstructured.Unstructured, opts *Option) []*unstructured.Unstructured {
+	if opts == nil {
+		opts = DefaultOption()
+	}
+
 	filtered := make([]*unstructured.Unstructured, 0, len(objs))
 
 	// Check if label selector is provided
@@ -26,7 +47,7 @@ func FilterResources(objs []*unstructured.Unstructured, opts *Options) []*unstru
 		var excludeKinds []string
 		if opts.ExcludeKinds == nil {
 			// Use default exclude kinds when none specified
-			excludeKinds = DefaultOptions().ExcludeKinds
+			excludeKinds = DefaultOption().ExcludeKinds
 		} else {
 			// Use provided exclude kinds (empty slice means exclude nothing)
 			excludeKinds = opts.ExcludeKinds

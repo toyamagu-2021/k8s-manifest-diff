@@ -28,7 +28,7 @@ secret data values masked for security purposes.`,
 			}
 
 			// Process the file
-			maskedYaml, err := parser.Yaml(reader)
+			maskedYaml, err := parser.Yaml(reader, nil)
 			if err != nil {
 				if closeErr := reader.Close(); closeErr != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to close file %s: %v\n", file, closeErr)

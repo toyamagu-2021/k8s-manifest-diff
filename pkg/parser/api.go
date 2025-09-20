@@ -11,25 +11,41 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// YamlString processes a YAML string and returns a masked version with secrets masked
-func YamlString(yamlStr string) (string, error) {
-	reader := strings.NewReader(yamlStr)
-	return Yaml(reader)
+// Options controls the parsing and masking behavior
+type Options struct {
+	DisableMaskingSecrets bool // Disable masking of secret values (default: false)
 }
 
-// Yaml processes YAML from an io.Reader and returns a masked version with secrets masked
-func Yaml(reader io.Reader) (string, error) {
+// DefaultOptions returns the default parsing options
+func DefaultOptions() *Options {
+	return &Options{
+		DisableMaskingSecrets: false,
+	}
+}
+
+// YamlString processes a YAML string and returns a version with optional masking
+func YamlString(yamlStr string, opts *Options) (string, error) {
+	reader := strings.NewReader(yamlStr)
+	return Yaml(reader, opts)
+}
+
+// Yaml processes YAML from an io.Reader and returns a version with optional masking
+func Yaml(reader io.Reader, opts *Options) (string, error) {
+	if opts == nil {
+		opts = DefaultOptions()
+	}
+
 	objects, err := ParseYAML(reader)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
-	maskedObjects, err := Objects(objects)
+	maskedObjects, err := Objects(objects, opts)
 	if err != nil {
-		return "", fmt.Errorf("failed to mask objects: %w", err)
+		return "", fmt.Errorf("failed to process objects: %w", err)
 	}
 
-	// Convert masked objects back to YAML
+	// Convert processed objects back to YAML
 	var yamlParts []string
 	for _, obj := range maskedObjects {
 		yamlBytes, err := yaml.Marshal(obj.Object)
@@ -43,27 +59,31 @@ func Yaml(reader io.Reader) (string, error) {
 	return strings.Join(yamlParts, "---\n"), nil
 }
 
-// Objects processes a slice of Kubernetes objects and returns masked versions
-func Objects(objs []*unstructured.Unstructured) ([]*unstructured.Unstructured, error) {
+// Objects processes a slice of Kubernetes objects and returns versions with optional masking
+func Objects(objs []*unstructured.Unstructured, opts *Options) ([]*unstructured.Unstructured, error) {
+	if opts == nil {
+		opts = DefaultOptions()
+	}
+
 	if objs == nil {
 		return nil, nil
 	}
 
 	masker := masking.NewMasker()
-	maskedObjects := make([]*unstructured.Unstructured, len(objs))
+	processedObjects := make([]*unstructured.Unstructured, len(objs))
 
 	for i, obj := range objs {
-		if masking.IsSecret(obj) {
+		if masking.IsSecret(obj) && !opts.DisableMaskingSecrets {
 			maskedObj, err := masker.MaskSecretData(obj)
 			if err != nil {
 				return nil, fmt.Errorf("failed to mask secret: %w", err)
 			}
-			maskedObjects[i] = maskedObj
+			processedObjects[i] = maskedObj
 		} else {
-			// For non-secret objects, return a copy to avoid modifying the original
-			maskedObjects[i] = obj.DeepCopy()
+			// For non-secret objects or when masking is disabled, return a copy to avoid modifying the original
+			processedObjects[i] = obj.DeepCopy()
 		}
 	}
 
-	return maskedObjects, nil
+	return processedObjects, nil
 }

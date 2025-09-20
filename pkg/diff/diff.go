@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/filter"
 	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/parser"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -38,8 +39,8 @@ func Objects(base, head []*unstructured.Unstructured, opts *Options) (Results, e
 		opts = DefaultOptions()
 	}
 
-	base = FilterResources(base, opts)
-	head = FilterResources(head, opts)
+	base = filter.Resources(base, opts.FilterOption)
+	head = filter.Resources(head, opts.FilterOption)
 	objMap := parseObjsToMap(base, head)
 	results := make(Results)
 
