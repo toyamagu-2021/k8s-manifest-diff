@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/filter"
 	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/masking"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -548,6 +549,365 @@ func TestYamlStringEdgeCases(t *testing.T) {
 			assert.NoError(t, err)
 			if tt.expectEmpty {
 				assert.Empty(t, result)
+			}
+		})
+	}
+}
+
+func TestObjectsWithFiltering(t *testing.T) {
+	// Reset masking state before test
+	masking.ResetMaskingState()
+
+	// Create test objects
+	configMap := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "test-config",
+				"namespace": "default",
+				"labels": map[string]any{
+					"app":  "myapp",
+					"tier": "frontend",
+				},
+				"annotations": map[string]any{
+					"version": "1.0",
+				},
+			},
+			"data": map[string]any{
+				"config": "some-value",
+			},
+		},
+	}
+
+	deployment := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"name":      "test-deployment",
+				"namespace": "default",
+				"labels": map[string]any{
+					"app":  "myapp",
+					"tier": "backend",
+				},
+				"annotations": map[string]any{
+					"version": "2.0",
+				},
+			},
+			"spec": map[string]any{
+				"replicas": int64(3),
+			},
+		},
+	}
+
+	secret := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata": map[string]any{
+				"name":      "test-secret",
+				"namespace": "default",
+				"labels": map[string]any{
+					"app":  "myapp",
+					"tier": "data",
+				},
+			},
+			"type": "Opaque",
+			"data": map[string]any{
+				"password": "cGFzc3dvcmQxMjM=", // gitleaks:allow
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		objects       []*unstructured.Unstructured
+		opts          *Options
+		expectedCount int
+		expectedKinds []string
+		expectError   bool
+		expectMasked  int
+	}{
+		{
+			name:          "no filtering",
+			objects:       []*unstructured.Unstructured{configMap, deployment, secret},
+			opts:          nil,
+			expectedCount: 3,
+			expectedKinds: []string{"ConfigMap", "Deployment", "Secret"},
+			expectMasked:  1,
+		},
+		{
+			name:    "exclude deployments",
+			objects: []*unstructured.Unstructured{configMap, deployment, secret},
+			opts: &Options{
+				FilterOption: &filter.Option{
+					ExcludeKinds: []string{"Deployment"},
+				},
+			},
+			expectedCount: 2,
+			expectedKinds: []string{"ConfigMap", "Secret"},
+			expectMasked:  1,
+		},
+		{
+			name:    "exclude multiple kinds",
+			objects: []*unstructured.Unstructured{configMap, deployment, secret},
+			opts: &Options{
+				FilterOption: &filter.Option{
+					ExcludeKinds: []string{"Deployment", "Secret"},
+				},
+			},
+			expectedCount: 1,
+			expectedKinds: []string{"ConfigMap"},
+			expectMasked:  0,
+		},
+		{
+			name:    "label selector filtering",
+			objects: []*unstructured.Unstructured{configMap, deployment, secret},
+			opts: &Options{
+				FilterOption: &filter.Option{
+					LabelSelector: map[string]string{
+						"tier": "frontend",
+					},
+				},
+			},
+			expectedCount: 1,
+			expectedKinds: []string{"ConfigMap"},
+			expectMasked:  0,
+		},
+		{
+			name:    "annotation selector filtering",
+			objects: []*unstructured.Unstructured{configMap, deployment, secret},
+			opts: &Options{
+				FilterOption: &filter.Option{
+					AnnotationSelector: map[string]string{
+						"version": "2.0",
+					},
+				},
+			},
+			expectedCount: 1,
+			expectedKinds: []string{"Deployment"},
+			expectMasked:  0,
+		},
+		{
+			name:    "combined filtering",
+			objects: []*unstructured.Unstructured{configMap, deployment, secret},
+			opts: &Options{
+				FilterOption: &filter.Option{
+					ExcludeKinds: []string{"Secret"},
+					LabelSelector: map[string]string{
+						"app": "myapp",
+					},
+				},
+			},
+			expectedCount: 2,
+			expectedKinds: []string{"ConfigMap", "Deployment"},
+			expectMasked:  0,
+		},
+		{
+			name:    "filter out all objects",
+			objects: []*unstructured.Unstructured{configMap, deployment, secret},
+			opts: &Options{
+				FilterOption: &filter.Option{
+					LabelSelector: map[string]string{
+						"nonexistent": "label",
+					},
+				},
+			},
+			expectedCount: 0,
+			expectedKinds: []string{},
+			expectMasked:  0,
+		},
+		{
+			name:    "disable masking with filtering",
+			objects: []*unstructured.Unstructured{configMap, deployment, secret},
+			opts: &Options{
+				FilterOption: &filter.Option{
+					LabelSelector: map[string]string{
+						"app": "myapp",
+					},
+				},
+				DisableMaskingSecrets: true,
+			},
+			expectedCount: 3,
+			expectedKinds: []string{"ConfigMap", "Deployment", "Secret"},
+			expectMasked:  0, // Masking disabled
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Objects(tt.objects, tt.opts)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Len(t, result, tt.expectedCount, "Result count should match expected")
+
+			// Check that the expected kinds are present
+			actualKinds := make([]string, len(result))
+			maskedCount := 0
+			for i, obj := range result {
+				assert.NotNil(t, obj, "Result object should not be nil")
+				actualKinds[i] = obj.GetKind()
+
+				if masking.IsSecret(obj) && (tt.opts == nil || !tt.opts.DisableMaskingSecrets) {
+					maskedCount++
+					// Verify secret is masked
+					if dataMap, found, _ := unstructured.NestedMap(obj.Object, "data"); found {
+						for _, value := range dataMap {
+							if strValue, ok := value.(string); ok && strValue != "" {
+								assert.True(t, strings.Contains(strValue, "+"), "Secret data should be masked")
+							}
+						}
+					}
+				}
+			}
+
+			// Check if all expected kinds are present (order doesn't matter)
+			for _, expectedKind := range tt.expectedKinds {
+				assert.Contains(t, actualKinds, expectedKind, "Expected kind %s should be present", expectedKind)
+			}
+
+			assert.Equal(t, tt.expectMasked, maskedCount, "Number of masked objects should match expectation")
+		})
+	}
+}
+
+func TestYamlStringWithFiltering(t *testing.T) {
+	// Reset masking state before test
+	masking.ResetMaskingState()
+
+	yamlInput := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+  namespace: default
+  labels:
+    app: myapp
+    tier: frontend
+data:
+  config: some-value
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deployment
+  namespace: default
+  labels:
+    app: myapp
+    tier: backend
+spec:
+  replicas: 3
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-secret
+  namespace: default
+  labels:
+    app: myapp
+    tier: data
+type: Opaque
+data:
+  password: cGFzc3dvcmQxMjM= # gitleaks:allow`
+
+	tests := []struct {
+		name                string
+		opts                *Options
+		expectError         bool
+		expectedResources   int
+		shouldContainSecret bool
+		shouldContainDeploy bool
+	}{
+		{
+			name:                "no filtering",
+			opts:                nil,
+			expectedResources:   3,
+			shouldContainSecret: true,
+			shouldContainDeploy: true,
+		},
+		{
+			name: "exclude deployments",
+			opts: &Options{
+				FilterOption: &filter.Option{
+					ExcludeKinds: []string{"Deployment"},
+				},
+			},
+			expectedResources:   2,
+			shouldContainSecret: true,
+			shouldContainDeploy: false,
+		},
+		{
+			name: "filter by label",
+			opts: &Options{
+				FilterOption: &filter.Option{
+					LabelSelector: map[string]string{
+						"tier": "frontend",
+					},
+				},
+			},
+			expectedResources:   1,
+			shouldContainSecret: false,
+			shouldContainDeploy: false,
+		},
+		{
+			name: "exclude secrets",
+			opts: &Options{
+				FilterOption: &filter.Option{
+					ExcludeKinds: []string{"Secret"},
+				},
+			},
+			expectedResources:   2,
+			shouldContainSecret: false,
+			shouldContainDeploy: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := YamlString(yamlInput, tt.opts)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+
+			if tt.expectedResources == 0 {
+				assert.Empty(t, result)
+				return
+			}
+
+			assert.NotEmpty(t, result)
+
+			// Count document separators to estimate number of resources
+			docCount := strings.Count(result, "---") + 1
+			if strings.TrimSpace(result) == "" {
+				docCount = 0
+			}
+
+			// Allow for slight variance due to YAML formatting
+			assert.True(t, docCount >= tt.expectedResources-1 && docCount <= tt.expectedResources+1,
+				"Document count should be around expected resources count, got %d, expected around %d", docCount, tt.expectedResources)
+
+			// Check presence of specific resources
+			if tt.shouldContainSecret {
+				assert.Contains(t, result, "kind: Secret", "Should contain Secret")
+				assert.Contains(t, result, "test-secret", "Should contain secret name")
+			} else {
+				assert.NotContains(t, result, "kind: Secret", "Should not contain Secret")
+			}
+
+			if tt.shouldContainDeploy {
+				assert.Contains(t, result, "kind: Deployment", "Should contain Deployment")
+				assert.Contains(t, result, "test-deployment", "Should contain deployment name")
+			} else {
+				assert.NotContains(t, result, "kind: Deployment", "Should not contain Deployment")
 			}
 		})
 	}

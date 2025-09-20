@@ -28,6 +28,14 @@ var (
 	summary              bool
 )
 
+// Parse command specific variables
+var (
+	parseExcludeKinds         []string
+	parseLabelSelectors       []string
+	parseAnnotationSelectors  []string
+	parseDisableMaskingSecret bool
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "k8s-manifest-diff",
 	Short: "Compare Kubernetes YAML manifests",
@@ -147,12 +155,19 @@ var versionCmd = &cobra.Command{
 }
 
 func init() {
+	// Diff command flags
 	diffCmd.Flags().StringSliceVar(&excludeKinds, "exclude-kinds", []string{}, "List of Kinds to exclude from diff")
 	diffCmd.Flags().StringSliceVar(&labelSelectors, "label", []string{}, "Label selector to filter resources (e.g., 'app=nginx', 'tier=frontend'). Can be specified multiple times.")
 	diffCmd.Flags().StringSliceVar(&annotationSelectors, "annotation", []string{}, "Annotation selector to filter resources (e.g., 'app.kubernetes.io/managed-by=helm', 'deployment.category=web'). Can be specified multiple times.")
 	diffCmd.Flags().IntVar(&context, "context", 3, "Number of context lines in diff output")
 	diffCmd.Flags().BoolVar(&disableMaskingSecret, "disable-masking-secret", false, "Disable masking of Secret data values in diff output")
 	diffCmd.Flags().BoolVar(&summary, "summary", false, "Output only the list of changed resources instead of full diff")
+
+	// Parse command flags
+	parseCmd.Flags().StringSliceVar(&parseExcludeKinds, "exclude-kinds", []string{}, "List of Kinds to exclude from parsing")
+	parseCmd.Flags().StringSliceVar(&parseLabelSelectors, "label", []string{}, "Label selector to filter resources (e.g., 'app=nginx', 'tier=frontend'). Can be specified multiple times.")
+	parseCmd.Flags().StringSliceVar(&parseAnnotationSelectors, "annotation", []string{}, "Annotation selector to filter resources (e.g., 'app.kubernetes.io/managed-by=helm', 'deployment.category=web'). Can be specified multiple times.")
+	parseCmd.Flags().BoolVar(&parseDisableMaskingSecret, "disable-masking-secret", false, "Disable masking of Secret data values in output")
 
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(parseCmd)

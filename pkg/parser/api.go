@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/filter"
 	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/masking"
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -13,12 +14,14 @@ import (
 
 // Options controls the parsing and masking behavior
 type Options struct {
-	DisableMaskingSecrets bool // Disable masking of secret values (default: false)
+	FilterOption          *filter.Option // Filtering options
+	DisableMaskingSecrets bool           // Disable masking of secret values (default: false)
 }
 
 // DefaultOptions returns the default parsing options
 func DefaultOptions() *Options {
 	return &Options{
+		FilterOption:          filter.DefaultOption(),
 		DisableMaskingSecrets: false,
 	}
 }
@@ -59,7 +62,7 @@ func Yaml(reader io.Reader, opts *Options) (string, error) {
 	return strings.Join(yamlParts, "---\n"), nil
 }
 
-// Objects processes a slice of Kubernetes objects and returns versions with optional masking
+// Objects processes a slice of Kubernetes objects and returns versions with optional masking and filtering
 func Objects(objs []*unstructured.Unstructured, opts *Options) ([]*unstructured.Unstructured, error) {
 	if opts == nil {
 		opts = DefaultOptions()
@@ -69,10 +72,13 @@ func Objects(objs []*unstructured.Unstructured, opts *Options) ([]*unstructured.
 		return nil, nil
 	}
 
-	masker := masking.NewMasker()
-	processedObjects := make([]*unstructured.Unstructured, len(objs))
+	// Apply filtering first
+	filteredObjs := filter.Resources(objs, opts.FilterOption)
 
-	for i, obj := range objs {
+	masker := masking.NewMasker()
+	processedObjects := make([]*unstructured.Unstructured, len(filteredObjs))
+
+	for i, obj := range filteredObjs {
 		if masking.IsSecret(obj) && !opts.DisableMaskingSecrets {
 			maskedObj, err := masker.MaskSecretData(obj)
 			if err != nil {
