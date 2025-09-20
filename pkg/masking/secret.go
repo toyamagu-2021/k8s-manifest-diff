@@ -6,7 +6,9 @@ import (
 	"os"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // Masker manages secret masking state and provides consistent value masking
@@ -32,10 +34,76 @@ func IsSecret(obj *unstructured.Unstructured) bool {
 	return obj != nil && obj.GetKind() == "Secret"
 }
 
+// ValidateSecret validates that the Secret object conforms to Kubernetes Secret specification
+// It ensures that both 'data' and 'stringData' fields contain only string values as required by K8s API
+func ValidateSecret(obj *unstructured.Unstructured) (err error) {
+	if obj == nil {
+		return fmt.Errorf("secret object is nil")
+	}
+
+	if !IsSecret(obj) {
+		return fmt.Errorf("object is not a Secret, got kind: %s", obj.GetKind())
+	}
+
+	// Get Secret name and namespace for better error messages
+	secretName := obj.GetName()
+	secretNamespace := obj.GetNamespace()
+	secretIdentifier := fmt.Sprintf("%s/%s", secretNamespace, secretName)
+	if secretNamespace == "" {
+		secretIdentifier = secretName
+	}
+	if secretIdentifier == "" {
+		secretIdentifier = "unnamed"
+	}
+
+	// Recover from panics that may occur when processing invalid structures
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("invalid Secret structure for %s: %v", secretIdentifier, r)
+		}
+	}()
+
+	// Validate that data field contains only string values
+	if dataMap, found, err := unstructured.NestedMap(obj.Object, "data"); err != nil {
+		return fmt.Errorf("invalid data field structure for Secret %s: %w", secretIdentifier, err)
+	} else if found {
+		for key, value := range dataMap {
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("invalid data field for Secret %s: key '%s' has non-string value of type %T", secretIdentifier, key, value)
+			}
+		}
+	}
+
+	// Validate that stringData field contains only string values
+	if stringDataMap, found, err := unstructured.NestedMap(obj.Object, "stringData"); err != nil {
+		return fmt.Errorf("invalid stringData field structure for Secret %s: %w", secretIdentifier, err)
+	} else if found {
+		for key, value := range stringDataMap {
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("invalid stringData field for Secret %s: key '%s' has non-string value of type %T", secretIdentifier, key, value)
+			}
+		}
+	}
+
+	// Additional validation: try to convert to structured Secret to catch other issues
+	// This uses a simpler approach that doesn't rely on encoding/decoding
+	secret := &corev1.Secret{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, secret); err != nil {
+		return fmt.Errorf("failed to convert Secret %s to structured format: %w", secretIdentifier, err)
+	}
+
+	return nil
+}
+
 // MaskSecretData creates a masked copy of the Secret object using the Masker instance
-func (m *Masker) MaskSecretData(obj *unstructured.Unstructured) *unstructured.Unstructured {
+func (m *Masker) MaskSecretData(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	if obj == nil || !IsSecret(obj) {
-		return obj
+		return obj, nil
+	}
+
+	// Validate the Secret structure before processing to prevent masking leakage
+	if err := ValidateSecret(obj); err != nil {
+		return nil, fmt.Errorf("secret validation failed: %w", err)
 	}
 
 	// Create a deep copy to avoid modifying the original
@@ -71,13 +139,13 @@ func (m *Masker) MaskSecretData(obj *unstructured.Unstructured) *unstructured.Un
 		}
 	}
 
-	return masked
+	return masked, nil
 }
 
 // MaskSecretData creates a masked copy of the Secret object using the default masker
 // Implementation based on ArgoCD gitops-engine's secret masking approach:
 // https://github.com/argoproj/gitops-engine/blob/v0.6.2/pkg/diff/diff.go
-func MaskSecretData(obj *unstructured.Unstructured) *unstructured.Unstructured {
+func MaskSecretData(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	return defaultMasker.MaskSecretData(obj)
 }
 

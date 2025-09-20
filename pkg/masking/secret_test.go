@@ -111,7 +111,8 @@ func TestMaskSecretData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			masked := MaskSecretData(tt.obj)
+			masked, err := MaskSecretData(tt.obj)
+			assert.NoError(t, err)
 
 			if tt.obj == nil {
 				assert.Nil(t, masked)
@@ -260,28 +261,45 @@ func TestMaskSecretDataEdgeCases(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		obj  *unstructured.Unstructured
+		name         string
+		obj          *unstructured.Unstructured
+		expectMasked bool
+		expectNil    bool
 	}{
 		{
-			name: "secret with nil values",
-			obj:  secretWithNilValues,
+			name:         "secret with nil values",
+			obj:          secretWithNilValues,
+			expectMasked: false,
+			expectNil:    true, // Should be rejected due to nil value
 		},
 		{
-			name: "secret with string number values",
-			obj:  secretWithNumberValues,
+			name:         "secret with string number values",
+			obj:          secretWithNumberValues,
+			expectMasked: false,
+			expectNil:    true, // Should be rejected due to invalid base64
 		},
 		{
-			name: "secret without data fields",
-			obj:  secretWithoutData,
+			name:         "secret without data fields",
+			obj:          secretWithoutData,
+			expectMasked: true,
+			expectNil:    false, // Should be valid (no data/stringData fields)
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			masked := MaskSecretData(tt.obj)
-			assert.NotNil(t, masked)
-			assert.Equal(t, "Secret", masked.GetKind())
+			masked, err := MaskSecretData(tt.obj)
+
+			if tt.expectNil {
+				assert.Error(t, err, "Expected masking to return error for invalid Secret")
+				assert.Nil(t, masked, "Expected masking to return nil for invalid Secret")
+			} else {
+				assert.NoError(t, err, "Expected no error for valid Secret")
+				assert.NotNil(t, masked, "Expected masking to return a result")
+				if masked != nil {
+					assert.Equal(t, "Secret", masked.GetKind(), "Expected result to be a Secret")
+				}
+			}
 		})
 	}
 }
@@ -579,7 +597,8 @@ data:
 			// Reset masking state for each test to ensure consistent behavior
 			ResetMaskingState()
 
-			masked := MaskSecretData(tt.secret)
+			masked, err := MaskSecretData(tt.secret)
+			assert.NoError(t, err)
 			assert.NotNil(t, masked)
 			assert.Equal(t, "Secret", masked.GetKind())
 
@@ -869,7 +888,8 @@ api:
 			// Keep reference to original for comparison
 			originalCopy := tt.secret.DeepCopy()
 
-			masked := MaskSecretData(tt.secret)
+			masked, err := MaskSecretData(tt.secret)
+			assert.NoError(t, err)
 			assert.NotNil(t, masked)
 			assert.Equal(t, "Secret", masked.GetKind())
 
@@ -924,8 +944,10 @@ func TestMaskSecretDataEdgeCasesAndConsistency(t *testing.T) {
 	}
 
 	// Mask both secrets
-	masked1 := MaskSecretData(secret1)
-	masked2 := MaskSecretData(secret2)
+	masked1, err1 := MaskSecretData(secret1)
+	assert.NoError(t, err1)
+	masked2, err2 := MaskSecretData(secret2)
+	assert.NoError(t, err2)
 
 	// Get masked data
 	maskedData1, found, _ := unstructured.NestedMap(masked1.Object, "data")
@@ -950,5 +972,220 @@ func TestMaskSecretDataEdgeCasesAndConsistency(t *testing.T) {
 		if strValue, ok := value.(string); ok {
 			assert.True(t, strings.Contains(strValue, "+"), "Value for key %s should be masked", key)
 		}
+	}
+}
+
+// TestMaskSecretDataWithInvalidFormats tests that invalid Secret formats are properly handled
+// This test demonstrates the vulnerability where non-string values are silently skipped
+func TestMaskSecretDataWithInvalidFormats(t *testing.T) {
+	// Reset masking state before test
+	ResetMaskingState()
+
+	tests := []struct {
+		name        string
+		secret      *unstructured.Unstructured
+		expectError bool
+		description string
+	}{
+		{
+			name: "secret with nested map in data field",
+			secret: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "invalid-nested-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": map[string]any{
+						"config": map[string]any{
+							"username": "admin",
+							"password": "secret123",
+						},
+						"validKey": "dmFsaWRWYWx1ZQ==", // gitleaks:allow
+					},
+				},
+			},
+			expectError: true,
+			description: "Nested maps in data field should be rejected",
+		},
+		{
+			name: "secret with integer values",
+			secret: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "invalid-int-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": map[string]any{
+						"port":     1234,
+						"validKey": "dmFsaWRWYWx1ZQ==", // gitleaks:allow
+					},
+					"stringData": map[string]any{
+						"timeout":  300,
+						"validKey": "validValue",
+					},
+				},
+			},
+			expectError: true,
+			description: "Integer values should be rejected",
+		},
+		{
+			name: "valid secret should pass",
+			secret: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "valid-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": map[string]any{
+						"username": "YWRtaW4=",
+						"password": "cGFzc3dvcmQ=",
+						"config":   "Y29uZmlnZGF0YQ==",
+					},
+					"stringData": map[string]any{
+						"token":  "plainTextToken",
+						"apiKey": "plainTextApiKey",
+					},
+				},
+			},
+			expectError: false,
+			description: "Valid Secret with only string values should pass",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// With validation implemented, invalid formats should now be rejected
+			masked, err := MaskSecretData(tt.secret)
+
+			if tt.expectError {
+				assert.Error(t, err, tt.description)
+				assert.Nil(t, masked)
+				t.Logf("Validation correctly rejected: %s", tt.description)
+			} else {
+				assert.NoError(t, err, tt.description)
+				assert.NotNil(t, masked, "Valid Secret should be masked")
+				assert.Equal(t, "Secret", masked.GetKind(), "Masked object should still be a Secret")
+				t.Logf("Validation correctly accepted: %s", tt.description)
+			}
+		})
+	}
+}
+
+// TestSecretValidation tests the ValidateSecret function directly
+func TestSecretValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		secret      *unstructured.Unstructured
+		expectError bool
+		errorText   string
+	}{
+		{
+			name:        "nil secret",
+			secret:      nil,
+			expectError: true,
+			errorText:   "secret object is nil",
+		},
+		{
+			name: "non-secret object",
+			secret: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"name":      "test-config",
+						"namespace": "default",
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "object is not a Secret",
+		},
+		{
+			name: "valid secret",
+			secret: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "valid-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": map[string]any{
+						"username": "YWRtaW4=",
+						"password": "cGFzc3dvcmQ=",
+					},
+					"stringData": map[string]any{
+						"token": "plainTextToken",
+					},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "secret with nested map in data",
+			secret: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "invalid-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": map[string]any{
+						"config": map[string]any{
+							"username": "admin",
+							"password": "secret",
+						},
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "non-string value of type map[string]interface {}",
+		},
+		{
+			name: "secret with integer value",
+			secret: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "invalid-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": map[string]any{
+						"port": 8080,
+					},
+				},
+			},
+			expectError: true,
+			errorText:   "invalid Secret structure",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSecret(tt.secret)
+
+			if tt.expectError {
+				assert.Error(t, err, "Expected validation to fail")
+				if tt.errorText != "" {
+					assert.Contains(t, err.Error(), tt.errorText, "Error message should contain expected text")
+				}
+			} else {
+				assert.NoError(t, err, "Expected validation to pass")
+			}
+		})
 	}
 }

@@ -54,7 +54,11 @@ func Objects(objs []*unstructured.Unstructured) ([]*unstructured.Unstructured, e
 
 	for i, obj := range objs {
 		if masking.IsSecret(obj) {
-			maskedObjects[i] = masker.MaskSecretData(obj)
+			maskedObj, err := masker.MaskSecretData(obj)
+			if err != nil {
+				return nil, fmt.Errorf("failed to mask secret: %w", err)
+			}
+			maskedObjects[i] = maskedObj
 		} else {
 			// For non-secret objects, return a copy to avoid modifying the original
 			maskedObjects[i] = obj.DeepCopy()

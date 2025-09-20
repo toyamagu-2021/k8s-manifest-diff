@@ -481,7 +481,8 @@ func TestSecretMaskingEdgeCases(t *testing.T) {
 	}
 
 	t.Run("secret mask function with nil input", func(t *testing.T) {
-		masked := masking.MaskSecretData(nil)
+		masked, err := masking.MaskSecretData(nil)
+		assert.NoError(t, err)
 		assert.Nil(t, masked)
 	})
 
