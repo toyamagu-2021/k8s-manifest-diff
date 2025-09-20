@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/masking"
 	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -67,9 +68,9 @@ func prepareObjectsForDiff(live, target *unstructured.Unstructured, opts *Option
 	preparedTarget := target
 
 	// Mask secrets if enabled
-	if !opts.DisableMaskSecrets && (isSecret(live) || isSecret(target)) {
-		preparedLive = maskSecretData(live)
-		preparedTarget = maskSecretData(target)
+	if !opts.DisableMaskSecrets && (masking.IsSecret(live) || masking.IsSecret(target)) {
+		preparedLive = masking.MaskSecretData(live)
+		preparedTarget = masking.MaskSecretData(target)
 	}
 
 	return preparedLive, preparedTarget
