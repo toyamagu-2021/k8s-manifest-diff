@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/diff"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/filter"
 	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/parser"
 )
 
@@ -105,11 +106,13 @@ Supports filtering options to exclude specific resource types.`,
 
 		// Create diff options
 		opts := &diff.Options{
-			ExcludeKinds:       excludeKinds,
-			LabelSelector:      labelSelectorMap,
-			AnnotationSelector: annotationSelectorMap,
-			Context:            context,
-			DisableMaskSecrets: disableMaskingSecret,
+			FilterOption: &filter.Option{
+				ExcludeKinds:       excludeKinds,
+				LabelSelector:      labelSelectorMap,
+				AnnotationSelector: annotationSelectorMap,
+			},
+			Context:               context,
+			DisableMaskingSecrets: disableMaskingSecret,
 		}
 
 		// Perform diff

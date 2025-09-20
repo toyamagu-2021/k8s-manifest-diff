@@ -1,4 +1,4 @@
-package diff
+package filter
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestFilterResources_LabelSelector(t *testing.T) {
+func TestResources_LabelSelector(t *testing.T) {
 	frontendObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "apps/v1",
@@ -122,10 +122,10 @@ func TestFilterResources_LabelSelector(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := &Options{
+			opts := &Option{
 				LabelSelector: tt.labelSelector,
 			}
-			filtered := FilterResources(objects, opts)
+			filtered := Resources(objects, opts)
 			assert.Equal(t, tt.expectedCount, len(filtered))
 
 			if tt.expectedCount > 0 {
@@ -146,7 +146,7 @@ func TestFilterResources_LabelSelector(t *testing.T) {
 	}
 }
 
-func TestFilterResources_LabelSelectorWithExcludeKinds(t *testing.T) {
+func TestResources_LabelSelectorWithExcludeKinds(t *testing.T) {
 	deploymentObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "apps/v1",
@@ -203,11 +203,11 @@ func TestFilterResources_LabelSelectorWithExcludeKinds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := &Options{
+			opts := &Option{
 				ExcludeKinds:  tt.excludeKinds,
 				LabelSelector: tt.labelSelector,
 			}
-			filtered := FilterResources(objects, opts)
+			filtered := Resources(objects, opts)
 			assert.Equal(t, tt.expectedCount, len(filtered))
 			assert.Equal(t, tt.expectedKind, filtered[0].GetKind())
 			assert.Equal(t, tt.expectedName, filtered[0].GetName())
@@ -215,7 +215,7 @@ func TestFilterResources_LabelSelectorWithExcludeKinds(t *testing.T) {
 	}
 }
 
-func TestFilterResources_AnnotationSelector(t *testing.T) {
+func TestResources_AnnotationSelector(t *testing.T) {
 	frontendObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "apps/v1",
@@ -330,10 +330,10 @@ func TestFilterResources_AnnotationSelector(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := &Options{
+			opts := &Option{
 				AnnotationSelector: tt.annotationSelector,
 			}
-			filtered := FilterResources(objects, opts)
+			filtered := Resources(objects, opts)
 			assert.Equal(t, tt.expectedCount, len(filtered))
 
 			if tt.expectedCount > 0 {
@@ -354,7 +354,7 @@ func TestFilterResources_AnnotationSelector(t *testing.T) {
 	}
 }
 
-func TestFilterResources_CombinedLabelAndAnnotationSelector(t *testing.T) {
+func TestResources_CombinedLabelAndAnnotationSelector(t *testing.T) {
 	frontendObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "apps/v1",
@@ -474,11 +474,11 @@ func TestFilterResources_CombinedLabelAndAnnotationSelector(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := &Options{
+			opts := &Option{
 				LabelSelector:      tt.labelSelector,
 				AnnotationSelector: tt.annotationSelector,
 			}
-			filtered := FilterResources(objects, opts)
+			filtered := Resources(objects, opts)
 			assert.Equal(t, tt.expectedCount, len(filtered))
 
 			if tt.expectedCount > 0 {
@@ -499,92 +499,91 @@ func TestFilterResources_CombinedLabelAndAnnotationSelector(t *testing.T) {
 	}
 }
 
-func TestObjects_DiffOptionsFiltering(t *testing.T) {
-	hookObj := unstructured.Unstructured{
+func TestResources_ExcludeKinds(t *testing.T) {
+	deploymentObj := &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       "Pod",
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
 			"metadata": map[string]any{
-				"name":        "hook-pod",
-				"namespace":   "test",
-				"annotations": map[string]any{"argocd.argoproj.io/hook": "PreSync"},
+				"name":      "test-deployment",
+				"namespace": "default",
 			},
 		},
 	}
 
-	secretObj := unstructured.Unstructured{
+	secretObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "Secret",
 			"metadata": map[string]any{
-				"name":      "secret",
-				"namespace": "test",
+				"name":      "test-secret",
+				"namespace": "default",
 			},
 		},
 	}
 
-	workflowObj := unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "argoproj.io/v1alpha1",
-			"kind":       "Workflow",
-			"metadata": map[string]any{
-				"name":      "workflow",
-				"namespace": "test",
-			},
-		},
-	}
-
-	normalObj := unstructured.Unstructured{
+	configMapObj := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
 			"metadata": map[string]any{
-				"name":      "config",
-				"namespace": "test",
+				"name":      "test-configmap",
+				"namespace": "default",
 			},
 		},
 	}
 
-	objects := []*unstructured.Unstructured{&hookObj, &secretObj, &workflowObj, &normalObj}
+	objects := []*unstructured.Unstructured{deploymentObj, secretObj, configMapObj}
 
 	tests := []struct {
-		name             string
-		options          *Options
-		shouldContain    []string
-		shouldNotContain []string
+		name          string
+		excludeKinds  []string
+		expectedCount int
+		expectedKinds []string
 	}{
 		{
-			name:             "default options include all objects",
-			options:          DefaultOptions(),
-			shouldContain:    []string{"ConfigMap", "Secret", "Workflow", "hook-pod"},
-			shouldNotContain: []string{},
+			name:          "no exclusions - all objects included",
+			excludeKinds:  []string{},
+			expectedCount: 3,
+			expectedKinds: []string{"Deployment", "Secret", "ConfigMap"},
 		},
 		{
-			name:             "include all when exclude kinds disabled",
-			options:          &Options{ExcludeKinds: []string{}},
-			shouldContain:    []string{"ConfigMap", "Secret", "Workflow", "hook-pod"},
-			shouldNotContain: []string{},
+			name:          "exclude Secret - only Deployment and ConfigMap included",
+			excludeKinds:  []string{"Secret"},
+			expectedCount: 2,
+			expectedKinds: []string{"Deployment", "ConfigMap"},
 		},
 		{
-			name:             "custom exclude kinds",
-			options:          &Options{ExcludeKinds: []string{"ConfigMap", "Secret"}},
-			shouldContain:    []string{"Workflow", "hook-pod"},
-			shouldNotContain: []string{"ConfigMap", "Secret"},
+			name:          "exclude multiple kinds",
+			excludeKinds:  []string{"Secret", "ConfigMap"},
+			expectedCount: 1,
+			expectedKinds: []string{"Deployment"},
+		},
+		{
+			name:          "exclude all - no objects included",
+			excludeKinds:  []string{"Deployment", "Secret", "ConfigMap"},
+			expectedCount: 0,
+			expectedKinds: []string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, err := Objects([]*unstructured.Unstructured{}, objects, tt.options)
-			assert.NoError(t, err)
-			assert.True(t, results.HasChanges())
-
-			diffResult := results.StringDiff()
-			for _, expected := range tt.shouldContain {
-				assert.Contains(t, diffResult, expected)
+			opts := &Option{
+				ExcludeKinds: tt.excludeKinds,
 			}
-			for _, notExpected := range tt.shouldNotContain {
-				assert.NotContains(t, diffResult, notExpected)
+			filtered := Resources(objects, opts)
+			assert.Equal(t, tt.expectedCount, len(filtered))
+
+			if tt.expectedCount > 0 {
+				kinds := make([]string, len(filtered))
+				for i, obj := range filtered {
+					kinds[i] = obj.GetKind()
+				}
+
+				for _, expectedKind := range tt.expectedKinds {
+					assert.Contains(t, kinds, expectedKind)
+				}
 			}
 		})
 	}

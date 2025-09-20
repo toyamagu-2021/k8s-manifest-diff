@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/filter"
 	"github.com/toyamagu-2021/k8s-manifest-diff/pkg/masking"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -148,8 +149,9 @@ func TestObjects_SecretMasking(t *testing.T) {
 			baseObjects: []*unstructured.Unstructured{baseSecret},
 			headObjects: []*unstructured.Unstructured{headSecret},
 			options: &Options{
-				DisableMaskSecrets: true,
-				Context:            3,
+				FilterOption:          filter.DefaultOption(),
+				Context:               3,
+				DisableMaskingSecrets: true,
 			},
 			expectChanges:    true,
 			shouldContain:    []string{"cGFzc3dvcmQxMjM=", "bmV3cGFzc3dvcmQ="},
@@ -384,8 +386,9 @@ data:
 		{
 			name: "yaml diff with secret masking disabled",
 			options: &Options{
-				DisableMaskSecrets: true,
-				Context:            3,
+				FilterOption:          filter.DefaultOption(),
+				Context:               3,
+				DisableMaskingSecrets: true,
 			},
 			shouldContain:    []string{"cGFzc3dvcmQxMjM=", "bmV3cGFzc3dvcmQ="},
 			shouldNotContain: []string{},

@@ -71,7 +71,7 @@ func prepareObjectsForDiff(live, target *unstructured.Unstructured, opts *Option
 	preparedTarget := target
 
 	// Mask secrets if enabled
-	if !opts.DisableMaskSecrets && (masking.IsSecret(live) || masking.IsSecret(target)) {
+	if !opts.DisableMaskingSecrets && (masking.IsSecret(live) || masking.IsSecret(target)) {
 		var err error
 		preparedLive, err = masking.MaskSecretData(live)
 		if err != nil {
