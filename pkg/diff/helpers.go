@@ -41,7 +41,10 @@ func requiresDiffOutput(changeType ChangeType) bool {
 
 // getDiffStr generates diff string between live and target objects
 func getDiffStr(name string, live, target *unstructured.Unstructured, opts *Options) (string, int, error) {
-	preparedLive, preparedTarget := prepareObjectsForDiff(live, target, opts)
+	preparedLive, preparedTarget, err := prepareObjectsForDiff(live, target, opts)
+	if err != nil {
+		return "", 99, err
+	}
 
 	liveData, err := convertObjectToYAML(preparedLive)
 	if err != nil {
@@ -63,17 +66,24 @@ func getDiffStr(name string, live, target *unstructured.Unstructured, opts *Opti
 }
 
 // prepareObjectsForDiff handles secret masking and returns prepared objects for diff
-func prepareObjectsForDiff(live, target *unstructured.Unstructured, opts *Options) (*unstructured.Unstructured, *unstructured.Unstructured) {
+func prepareObjectsForDiff(live, target *unstructured.Unstructured, opts *Options) (*unstructured.Unstructured, *unstructured.Unstructured, error) {
 	preparedLive := live
 	preparedTarget := target
 
 	// Mask secrets if enabled
 	if !opts.DisableMaskSecrets && (masking.IsSecret(live) || masking.IsSecret(target)) {
-		preparedLive = masking.MaskSecretData(live)
-		preparedTarget = masking.MaskSecretData(target)
+		var err error
+		preparedLive, err = masking.MaskSecretData(live)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to mask live secret: %w", err)
+		}
+		preparedTarget, err = masking.MaskSecretData(target)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to mask target secret: %w", err)
+		}
 	}
 
-	return preparedLive, preparedTarget
+	return preparedLive, preparedTarget, nil
 }
 
 // convertObjectToYAML converts an unstructured object to YAML string
