@@ -26,6 +26,7 @@ var (
 	context              int
 	disableMaskingSecret bool
 	summary              bool
+	outputFormat         string
 )
 
 // Parse command specific variables
@@ -112,6 +113,11 @@ Supports filtering options to exclude specific resource types.`,
 			}
 		}
 
+		// Validate output format
+		if outputFormat != "default" && outputFormat != "markdown" {
+			return fmt.Errorf("invalid output format: %s (supported formats: default, markdown)", outputFormat)
+		}
+
 		// Create diff options
 		opts := &diff.Options{
 			FilterOption: &filter.Option{
@@ -131,10 +137,17 @@ Supports filtering options to exclude specific resource types.`,
 
 		if results.HasChanges() {
 			if summary {
-				fmt.Print(results.StringSummary())
+				if outputFormat == "markdown" {
+					fmt.Print(results.StringSummaryMarkdown())
+				} else {
+					fmt.Print(results.StringSummary())
+				}
 			} else {
-				// Output the full diff using StringDiff method
-				fmt.Print(results.StringDiff())
+				if outputFormat == "markdown" {
+					fmt.Print(results.StringDiffMarkdown())
+				} else {
+					fmt.Print(results.StringDiff())
+				}
 			}
 			os.Exit(1)
 		}
@@ -162,6 +175,7 @@ func init() {
 	diffCmd.Flags().IntVar(&context, "context", 3, "Number of context lines in diff output")
 	diffCmd.Flags().BoolVar(&disableMaskingSecret, "disable-masking-secret", false, "Disable masking of Secret data values in diff output")
 	diffCmd.Flags().BoolVar(&summary, "summary", false, "Output only the list of changed resources instead of full diff")
+	diffCmd.Flags().StringVar(&outputFormat, "output-format", "default", "Output format (default|markdown)")
 
 	// Parse command flags
 	parseCmd.Flags().StringSliceVar(&parseExcludeKinds, "exclude-kinds", []string{}, "List of Kinds to exclude from parsing")

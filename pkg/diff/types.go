@@ -178,6 +178,110 @@ func (dr Results) StringSummaryAsComments() string {
 	return result.String()
 }
 
+// StringSummaryMarkdown returns a summary string in Markdown format
+func (dr Results) StringSummaryMarkdown() string {
+	var result strings.Builder
+
+	// Helper function to format ResourceKey as string
+	formatResourceKey := func(key ResourceKey) string {
+		if key.Namespace != "" {
+			return fmt.Sprintf("`%s/%s/%s`", key.Kind, key.Namespace, key.Name)
+		}
+		return fmt.Sprintf("`%s/%s`", key.Kind, key.Name)
+	}
+
+	// Helper function to write a section with count and header
+	writeSection := func(title string, keys []ResourceKey) {
+		if len(keys) > 0 {
+			result.WriteString(fmt.Sprintf("## %s (%d)\n", title, len(keys)))
+			for _, key := range keys {
+				result.WriteString(fmt.Sprintf("- %s\n", formatResourceKey(key)))
+			}
+			result.WriteString("\n")
+		}
+	}
+
+	// Get sections
+	unchangedKeys := dr.FilterUnchanged().GetResourceKeys()
+	changedKeys := dr.FilterChanged().GetResourceKeys()
+	createdKeys := dr.FilterCreated().GetResourceKeys()
+	deletedKeys := dr.FilterDeleted().GetResourceKeys()
+
+	// Only add header if there are any resources
+	stats := dr.GetStatistics()
+	if stats.Total > 0 {
+		result.WriteString("# Kubernetes Manifest Diff\n\n")
+		result.WriteString("## Summary\n")
+		result.WriteString(fmt.Sprintf("**Total Resources**: %d  \n", stats.Total))
+		result.WriteString(fmt.Sprintf("**Changed**: %d | **Created**: %d | **Deleted**: %d | **Unchanged**: %d\n\n",
+			stats.Changed, stats.Created, stats.Deleted, stats.Unchanged))
+	}
+
+	// Use filtering methods to organize resources by change type
+	writeSection("Created Resources", createdKeys)
+	writeSection("Changed Resources", changedKeys)
+	writeSection("Deleted Resources", deletedKeys)
+	writeSection("Unchanged Resources", unchangedKeys)
+
+	return strings.TrimRight(result.String(), "\n")
+}
+
+// StringDiffMarkdown returns a concatenated string of all diff results with markdown formatting
+func (dr Results) StringDiffMarkdown() string {
+	var result strings.Builder
+
+	// Check if there are any changes that need diff output
+	hasDiffContent := false
+	for _, diffResult := range dr {
+		if diffResult.Diff != "" {
+			hasDiffContent = true
+			break
+		}
+	}
+
+	// Add summary content as markdown header only if there are changes
+	if hasDiffContent {
+		summaryMarkdown := dr.StringSummaryMarkdown()
+		if summaryMarkdown != "" {
+			result.WriteString(summaryMarkdown)
+			result.WriteString("\n\n---\n\n")
+			result.WriteString("## Resource Changes\n\n")
+		}
+	}
+
+	// Add diff content with markdown formatting
+	for key, diffResult := range dr {
+		if diffResult.Diff != "" {
+			// Extract the original diff content without the header
+			lines := strings.Split(diffResult.Diff, "\n")
+			var diffLines []string
+			headerFound := false
+			for _, line := range lines {
+				if strings.HasPrefix(line, "===== ") && strings.HasSuffix(line, " ======") {
+					headerFound = true
+					continue
+				}
+				if headerFound {
+					diffLines = append(diffLines, line)
+				}
+			}
+
+			// Format resource header in markdown
+			if key.Namespace != "" {
+				result.WriteString(fmt.Sprintf("### %s/%s %s/%s\n", key.Group, key.Kind, key.Namespace, key.Name))
+			} else {
+				result.WriteString(fmt.Sprintf("### %s/%s %s\n", key.Group, key.Kind, key.Name))
+			}
+
+			// Add diff content in code block
+			result.WriteString("```diff\n")
+			result.WriteString(strings.Join(diffLines, "\n"))
+			result.WriteString("\n```\n\n")
+		}
+	}
+	return strings.TrimRight(result.String(), "\n")
+}
+
 // FilterByType returns a new Results containing only resources with the specified change type
 func (dr Results) FilterByType(changeType ChangeType) Results {
 	result := make(Results)
