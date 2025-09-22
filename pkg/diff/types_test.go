@@ -398,3 +398,165 @@ func TestResults_StringSummary(t *testing.T) {
 		})
 	}
 }
+
+func TestResults_StringSummaryMarkdown(t *testing.T) {
+	results := Results{
+		ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1"}:    {Type: Changed, Diff: "diff1"},
+		ResourceKey{Kind: "Deployment", Namespace: "production", Name: "app2"}: {Type: Changed, Diff: "diff2"},
+		ResourceKey{Kind: "Service", Namespace: "default", Name: "svc1"}:       {Type: Created, Diff: "diff3"},
+		ResourceKey{Kind: "ConfigMap", Name: "config1"}:                        {Type: Deleted, Diff: "diff4"}, // cluster-scoped
+		ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}:     {Type: Unchanged, Diff: ""},
+	}
+
+	unchangedOnlyResults := Results{
+		ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}: {Type: Unchanged, Diff: ""},
+	}
+
+	emptyResults := Results{}
+
+	tests := []struct {
+		name             string
+		results          Results
+		shouldContain    []string
+		shouldNotContain []string
+		expectEmpty      bool
+	}{
+		{
+			name:    "mixed results markdown summary",
+			results: results,
+			shouldContain: []string{
+				"# Kubernetes Manifest Diff",
+				"## Summary",
+				"**Total Resources**: 5",
+				"**Changed**: 2 | **Created**: 1 | **Deleted**: 1 | **Unchanged**: 1",
+				"## Created Resources (1)",
+				"- `Service/default/svc1`",
+				"## Changed Resources (2)",
+				"- `Deployment/default/app1`",
+				"- `Deployment/production/app2`",
+				"## Deleted Resources (1)",
+				"- `ConfigMap/config1`",
+				"## Unchanged Resources (1)",
+				"- `Secret/default/secret1`",
+			},
+			shouldNotContain: []string{},
+			expectEmpty:      false,
+		},
+		{
+			name:    "unchanged only markdown summary",
+			results: unchangedOnlyResults,
+			shouldContain: []string{
+				"# Kubernetes Manifest Diff",
+				"## Summary",
+				"**Total Resources**: 1",
+				"**Changed**: 0 | **Created**: 0 | **Deleted**: 0 | **Unchanged**: 1",
+				"## Unchanged Resources (1)",
+				"- `Secret/default/secret1`",
+			},
+			shouldNotContain: []string{
+				"Created Resources", "Changed Resources", "Deleted Resources",
+			},
+			expectEmpty: false,
+		},
+		{
+			name:        "empty results markdown summary",
+			results:     emptyResults,
+			expectEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			summary := tt.results.StringSummaryMarkdown()
+
+			if tt.expectEmpty {
+				assert.Equal(t, "", summary)
+				return
+			}
+
+			for _, expected := range tt.shouldContain {
+				assert.Contains(t, summary, expected)
+			}
+
+			for _, notExpected := range tt.shouldNotContain {
+				assert.NotContains(t, summary, notExpected)
+			}
+		})
+	}
+}
+
+func TestResults_StringDiffMarkdown(t *testing.T) {
+	results := Results{
+		ResourceKey{Kind: "Deployment", Namespace: "default", Name: "app1", Group: "apps"}: {
+			Type: Changed,
+			Diff: "===== apps/Deployment default/app1 ======\n--- app1-live.yaml\n+++ app1.yaml\n@@ -1,3 +1,3 @@\n spec:\n-  replicas: 2\n+  replicas: 3\n",
+		},
+		ResourceKey{Kind: "Service", Namespace: "default", Name: "svc1", Group: ""}: {
+			Type: Created,
+			Diff: "===== /Service default/svc1 ======\n--- svc1-live.yaml\n+++ svc1.yaml\n@@ -0,0 +1,5 @@\n+apiVersion: v1\n+kind: Service\n+metadata:\n+  name: svc1\n+  namespace: default\n",
+		},
+		ResourceKey{Kind: "Secret", Namespace: "default", Name: "secret1"}: {Type: Unchanged, Diff: ""},
+	}
+
+	emptyResults := Results{}
+
+	tests := []struct {
+		name             string
+		results          Results
+		shouldContain    []string
+		shouldNotContain []string
+		expectEmpty      bool
+	}{
+		{
+			name:    "mixed results markdown diff",
+			results: results,
+			shouldContain: []string{
+				"# Kubernetes Manifest Diff",
+				"## Summary",
+				"**Total Resources**: 3",
+				"**Changed**: 1 | **Created**: 1 | **Deleted**: 0 | **Unchanged**: 1",
+				"---",
+				"## Resource Changes",
+				"### apps/Deployment default/app1",
+				"```diff",
+				"--- app1-live.yaml",
+				"+++ app1.yaml",
+				"-  replicas: 2",
+				"+  replicas: 3",
+				"```",
+				"### /Service default/svc1",
+				"+apiVersion: v1",
+				"+kind: Service",
+			},
+			shouldNotContain: []string{
+				"===== apps/Deployment default/app1 ======",
+				"===== /Service default/svc1 ======",
+			},
+			expectEmpty: false,
+		},
+		{
+			name:        "empty results markdown diff",
+			results:     emptyResults,
+			expectEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diff := tt.results.StringDiffMarkdown()
+
+			if tt.expectEmpty {
+				assert.Equal(t, "", diff)
+				return
+			}
+
+			for _, expected := range tt.shouldContain {
+				assert.Contains(t, diff, expected)
+			}
+
+			for _, notExpected := range tt.shouldNotContain {
+				assert.NotContains(t, diff, notExpected)
+			}
+		})
+	}
+}

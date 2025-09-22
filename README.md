@@ -2,6 +2,78 @@
 
 A CLI tool and Go library for parsing Kubernetes YAML/JSON manifests and computing diffs between sets of Kubernetes objects.
 
+```markdown
+❯ dist/k8s-manifest-diff diff base.yaml head.yaml --output-format markdown
+# Kubernetes Manifest Diff
+
+## Summary
+**Total Resources**: 4
+**Changed**: 4 | **Created**: 0 | **Deleted**: 0 | **Unchanged**: 0
+
+## Changed Resources (4)
+- `Deployment/default/frontend-app`
+- `Deployment/default/backend-app`
+- `ConfigMap/default/app-config`
+- `Secret/default/db-secret`
+
+---
+
+## Resource Changes
+
+### apps/Deployment default/backend-app
+```diff
+--- backend-app-live.yaml
++++ backend-app.yaml
+@@ -5,7 +5,7 @@
+     annotations:
+       app.kubernetes.io/managed-by: kubectl
+       deployment.category: api
+-      deployment.kubernetes.io/revision: "3"
++      deployment.kubernetes.io/revision: "2"
+     labels:
+       app: api
+       environment: production
+@@ -13,7 +13,7 @@
+     name: backend-app
+     namespace: default
+   spec:
+-    replicas: 4
++    replicas: 3
+     selector:
+       matchLabels:
+         app: api
+@@ -23,7 +23,7 @@
+           app: api
+       spec:
+         containers:
+-        - image: myapi:1.1
++        - image: myapi:1.0
+           name: api
+           ports:
+           - containerPort: 8080
+
+```
+
+### /Secret default/db-secret
+```diff
+--- db-secret-live.yaml
++++ db-secret.yaml
+@@ -1,8 +1,8 @@
+ object:
+   apiVersion: v1
+   data:
+-    password: ++++++++++++++++
+-    username: +++++++++++++++++
++    password: ++++++++++++++++++
++    username: +++++++++++++++++++
+   kind: Secret
+   metadata:
+     annotations:
+
+```
+...
+```
+
 ## Features
 
 - CLI tool for comparing Kubernetes YAML manifests
