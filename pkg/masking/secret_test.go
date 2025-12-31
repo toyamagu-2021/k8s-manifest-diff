@@ -284,6 +284,58 @@ func TestMaskSecretDataEdgeCases(t *testing.T) {
 			expectMasked: true,
 			expectNil:    false, // Should be valid (no data/stringData fields)
 		},
+		{
+			name: "secret with empty data field (nil)",
+			obj: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "empty-data-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": nil, // empty data: field
+				},
+			},
+			expectMasked: true,
+			expectNil:    false, // Should be valid (empty data: is valid in K8s)
+		},
+		{
+			name: "secret with empty stringData field (nil)",
+			obj: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "empty-stringdata-secret",
+						"namespace": "default",
+					},
+					"type":       "Opaque",
+					"stringData": nil, // empty stringData: field
+				},
+			},
+			expectMasked: true,
+			expectNil:    false, // Should be valid (empty stringData: is valid in K8s)
+		},
+		{
+			name: "secret with both data and stringData empty (nil)",
+			obj: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "both-empty-secret",
+						"namespace": "default",
+					},
+					"type":       "Opaque",
+					"data":       nil,
+					"stringData": nil,
+				},
+			},
+			expectMasked: true,
+			expectNil:    false, // Should be valid (both empty is valid in K8s)
+		},
 	}
 
 	for _, tt := range tests {

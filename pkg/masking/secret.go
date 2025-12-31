@@ -34,6 +34,19 @@ func IsSecret(obj *unstructured.Unstructured) bool {
 	return obj != nil && obj.GetKind() == "Secret"
 }
 
+// getNestedMapOrEmpty returns the nested map at the given path, treating nil as empty map.
+// This handles the case where YAML has `data:` with no value (nil).
+func getNestedMapOrEmpty(obj map[string]interface{}, field string) (map[string]interface{}, bool, error) {
+	val, exists := obj[field]
+	if !exists {
+		return nil, false, nil
+	}
+	if val == nil {
+		return map[string]interface{}{}, true, nil
+	}
+	return unstructured.NestedMap(obj, field)
+}
+
 // ValidateSecret validates that the Secret object conforms to Kubernetes Secret specification
 // It ensures that both 'data' and 'stringData' fields contain only string values as required by K8s API
 func ValidateSecret(obj *unstructured.Unstructured) (err error) {
@@ -64,7 +77,7 @@ func ValidateSecret(obj *unstructured.Unstructured) (err error) {
 	}()
 
 	// Validate that data field contains only string values
-	if dataMap, found, err := unstructured.NestedMap(obj.Object, "data"); err != nil {
+	if dataMap, found, err := getNestedMapOrEmpty(obj.Object, "data"); err != nil {
 		return fmt.Errorf("invalid data field structure for Secret %s: %w", secretIdentifier, err)
 	} else if found {
 		for key, value := range dataMap {
@@ -75,7 +88,7 @@ func ValidateSecret(obj *unstructured.Unstructured) (err error) {
 	}
 
 	// Validate that stringData field contains only string values
-	if stringDataMap, found, err := unstructured.NestedMap(obj.Object, "stringData"); err != nil {
+	if stringDataMap, found, err := getNestedMapOrEmpty(obj.Object, "stringData"); err != nil {
 		return fmt.Errorf("invalid stringData field structure for Secret %s: %w", secretIdentifier, err)
 	} else if found {
 		for key, value := range stringDataMap {
