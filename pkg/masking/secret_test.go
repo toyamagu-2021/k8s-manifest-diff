@@ -273,10 +273,10 @@ func TestMaskSecretDataEdgeCases(t *testing.T) {
 			expectNil:    true, // Should be rejected due to nil value
 		},
 		{
-			name:         "secret with string number values",
+			name:         "secret with string number values (non-base64)",
 			obj:          secretWithNumberValues,
-			expectMasked: false,
-			expectNil:    true, // Should be rejected due to invalid base64
+			expectMasked: true,
+			expectNil:    false, // Now passes: skip structured conversion for non-base64 data
 		},
 		{
 			name:         "secret without data fields",
@@ -335,6 +335,26 @@ func TestMaskSecretDataEdgeCases(t *testing.T) {
 			},
 			expectMasked: true,
 			expectNil:    false, // Should be valid (both empty is valid in K8s)
+		},
+		{
+			name: "secret with SOPS encrypted values in data field",
+			obj: &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Secret",
+					"metadata": map[string]any{
+						"name":      "sops-secret",
+						"namespace": "default",
+					},
+					"type": "Opaque",
+					"data": map[string]any{
+						"password": "ENC[AES256_GCM,data:abc123,iv:xyz,tag:456,type:str]",
+						"api-key":  "ENC[AES256_GCM,data:def789,iv:uvw,tag:012,type:str]",
+					},
+				},
+			},
+			expectMasked: true,
+			expectNil:    false, // Should be valid: skip structured conversion for SOPS ENC values
 		},
 	}
 
