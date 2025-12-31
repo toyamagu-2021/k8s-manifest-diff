@@ -2,6 +2,7 @@
 package masking
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"sync"
@@ -10,6 +11,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 )
+
+// isValidBase64 checks if a string is valid base64 encoded data
+func isValidBase64(s string) bool {
+	_, err := base64.StdEncoding.DecodeString(s)
+	return err == nil
+}
 
 // Masker manages secret masking state and provides consistent value masking
 type Masker struct {
@@ -98,11 +105,28 @@ func ValidateSecret(obj *unstructured.Unstructured) (err error) {
 		}
 	}
 
-	// Additional validation: try to convert to structured Secret to catch other issues
-	// This uses a simpler approach that doesn't rely on encoding/decoding
-	secret := &corev1.Secret{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, secret); err != nil {
-		return fmt.Errorf("failed to convert Secret %s to structured format: %w", secretIdentifier, err)
+	// Check if all data values are valid base64
+	// If not (e.g., SOPS ENC[...] values), skip structured conversion
+	// The masking will still work on string values directly
+	hasNonBase64Data := false
+	if dataMap, found, _ := getNestedMapOrEmpty(obj.Object, "data"); found {
+		for _, value := range dataMap {
+			if strValue, ok := value.(string); ok {
+				if strValue != "" && !isValidBase64(strValue) {
+					hasNonBase64Data = true
+					break
+				}
+			}
+		}
+	}
+
+	// Only validate with structured conversion if all data values are valid base64
+	// This allows SOPS-encrypted secrets with plain text ENC[...] values to be processed
+	if !hasNonBase64Data {
+		secret := &corev1.Secret{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, secret); err != nil {
+			return fmt.Errorf("failed to convert Secret %s to structured format: %w", secretIdentifier, err)
+		}
 	}
 
 	return nil
