@@ -1,6 +1,6 @@
 module github.com/toyamagu-2021/k8s-manifest-diff
 
-go 1.25.0
+go 1.27.4
 
 require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
