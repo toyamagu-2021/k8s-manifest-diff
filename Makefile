@@ -132,3 +132,14 @@ test-e2e-quick: build
 .PHONY: test-all
 test-all: test test-e2e
 	@echo "All tests completed"
+
+# Signed annotated tag on HEAD. GitHub marks the tag Verified.
+# Refuses to move an existing tag and does not push.
+.PHONY: tag
+tag:
+	@test -n "$(TAG)" || (echo "usage: make tag TAG=vX.Y.Z" && exit 1)
+	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+		echo "tag $(TAG) already exists; refusing to move it"; \
+		exit 1; \
+	fi
+	git tag -s "$(TAG)" -m "$(TAG)"
