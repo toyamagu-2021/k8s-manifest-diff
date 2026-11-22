@@ -43,19 +43,30 @@ deps:
 tidy:
 	$(GOMOD) tidy
 
+# Pinned tool versions. Do not use @latest.
+GOIMPORTS_VERSION ?= v0.53.0
+STATICCHECK_VERSION ?= v0.8.2
+GOLINT_VERSION ?= v0.0.0-20241112194109-818c5a804067
+INEFFASSIGN_VERSION ?= v0.2.0
+ERRCHECK_VERSION ?= v1.30.0
+MISSPELL_VERSION ?= v0.3.4
+GOSEC_VERSION ?= v2.30.0
+REVIVE_VERSION ?= v1.17.1
+GOTESTSUM_VERSION ?= v1.13.0
+
 # Tools
 .PHONY: tools.init
 tools.init:
 	@mkdir -p $(BIN_DIR)
-	GOBIN=$(BIN_DIR) go install golang.org/x/tools/cmd/goimports@latest
-	GOBIN=$(BIN_DIR) go install honnef.co/go/tools/cmd/staticcheck@latest
-	GOBIN=$(BIN_DIR) go install golang.org/x/lint/golint@latest
-	GOBIN=$(BIN_DIR) go install github.com/gordonklaus/ineffassign@latest
-	GOBIN=$(BIN_DIR) go install github.com/kisielk/errcheck@latest
-	GOBIN=$(BIN_DIR) go install github.com/client9/misspell/cmd/misspell@latest
-	GOBIN=$(BIN_DIR) go install github.com/securego/gosec/v2/cmd/gosec@latest
-	GOBIN=$(BIN_DIR) go install github.com/mgechev/revive@latest
-	GOBIN=$(BIN_DIR) go install gotest.tools/gotestsum@latest
+	GOBIN=$(BIN_DIR) go install golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION)
+	GOBIN=$(BIN_DIR) go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+	GOBIN=$(BIN_DIR) go install golang.org/x/lint/golint@$(GOLINT_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/gordonklaus/ineffassign@$(INEFFASSIGN_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/kisielk/errcheck@$(ERRCHECK_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/client9/misspell/cmd/misspell@$(MISSPELL_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+	GOBIN=$(BIN_DIR) go install github.com/mgechev/revive@$(REVIVE_VERSION)
+	GOBIN=$(BIN_DIR) go install gotest.tools/gotestsum@$(GOTESTSUM_VERSION)
 
 # Linting
 .PHONY: fmt
