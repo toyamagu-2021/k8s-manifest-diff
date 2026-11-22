@@ -1,0 +1,39 @@
+name: govulncheck
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@aebdcf6156ab6691adf63218240e476564a1ed4c # v2.23.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.10.0
+
+      # govulncheck v1.10.0 cannot typecheck Go 1.27 source. Scan the
+      # release binary instead, which is built with the module toolchain.
+      - name: Scan the release binary
+        run: |
+          mkdir -p bin
+          go build -o bin/k8s-manifest-diff ./cmd/k8s-manifest-diff
+          govulncheck -mode=binary bin/k8s-manifest-diff
