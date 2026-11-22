@@ -232,7 +232,7 @@ make build
 
 ### Prerequisites
 
-- Go 1.25.0 or later
+- Go 1.27.4 or later
 - Make
 
 ### Build and Development Commands
