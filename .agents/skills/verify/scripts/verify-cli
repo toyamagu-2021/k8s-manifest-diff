@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+
+RUN_ID="${RUN_ID:-local}"
+WORK_DIR="${VERIFY_WORK_DIR:-/tmp/k8s-manifest-diff-verify-${RUN_ID}}"
+PROOF_DIR="${VERIFY_PROOF_DIR:-/tmp/k8s-manifest-diff-proof-${RUN_ID}}"
+BIN_PATH="${WORK_DIR}/bin/k8s-manifest-diff"
+INSTANCE_ENV="${WORK_DIR}/instance.env"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  verify-cli launch
+  verify-cli doctor
+  verify-cli run --artifact <name> [--expect-exit <code>] [--] <cli-args...>
+  verify-cli cleanup
+
+Environment variables:
+  RUN_ID            Unique identifier for run isolation (default: local)
+  VERIFY_WORK_DIR   Disposable workspace path (default: /tmp/k8s-manifest-diff-verify-$RUN_ID)
+  VERIFY_PROOF_DIR  Durable proof artifact directory (default: /tmp/k8s-manifest-diff-proof-$RUN_ID)
+EOF
+}
+
+cmd_launch() {
+  rm -rf "${WORK_DIR}"
+  mkdir -p "${WORK_DIR}/bin" "${WORK_DIR}/fixtures" "${WORK_DIR}/scratch" "${PROOF_DIR}"
+
+  cp -R "${REPO_ROOT}/testing/e2e/fixtures/." "${WORK_DIR}/fixtures/"
+
+  local version commit build_date
+  version="$(git -C "${REPO_ROOT}" describe --tags --always --dirty 2>/dev/null || echo "dev")"
+  commit="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo "none")"
+  build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+  (
+    cd "${REPO_ROOT}"
+    go build \
+      -ldflags "-X main.version=${version} -X main.commit=${commit} -X main.date=${build_date}" \
+      -o "${BIN_PATH}" \
+      ./cmd/k8s-manifest-diff
+  )
+
+  local bin_sha
+  bin_sha="$(sha256sum "${BIN_PATH}" | awk '{print $1}')"
+
+  cat > "${INSTANCE_ENV}" <<EOF
+RUN_ID=${RUN_ID}
+REPO_ROOT=${REPO_ROOT}
+WORK_DIR=${WORK_DIR}
+PROOF_DIR=${PROOF_DIR}
+BIN_PATH=${BIN_PATH}
+EXPECTED_VERSION=${version}
+EXPECTED_COMMIT=${commit}
+BUILD_DATE=${build_date}
+BIN_SHA256=${bin_sha}
+EOF
+
+  local ver_out
+  ver_out="$("${BIN_PATH}" version)"
+  if [[ "${ver_out}" != *"k8s-manifest-diff version ${version}"* ]]; then
+    echo "ERROR: launched binary failed version check: ${ver_out}" >&2
+    exit 1
+  fi
+
+  echo "READY"
+  echo "RUN_ID=${RUN_ID}"
+  echo "WORK_DIR=${WORK_DIR}"
+  echo "PROOF_DIR=${PROOF_DIR}"
+  echo "BIN_PATH=${BIN_PATH}"
+  echo "COMMIT=${commit}"
+}
+
+cmd_doctor() {
+  if [[ ! -f "${INSTANCE_ENV}" ]]; then
+    echo "DOCTOR FAIL: missing instance metadata at ${INSTANCE_ENV} (run 'verify-cli launch' first)" >&2
+    exit 1
+  fi
+
+  # shellcheck disable=SC1090
+  source "${INSTANCE_ENV}"
+
+  if [[ ! -x "${BIN_PATH}" ]]; then
+    echo "DOCTOR FAIL: binary not executable at ${BIN_PATH}" >&2
+    exit 1
+  fi
+
+  local actual_sha
+  actual_sha="$(sha256sum "${BIN_PATH}" | awk '{print $1}')"
+  if [[ "${actual_sha}" != "${BIN_SHA256}" ]]; then
+    echo "DOCTOR FAIL: binary checksum mismatch (expected ${BIN_SHA256}, got ${actual_sha})" >&2
+    exit 1
+  fi
+
+  local repo_commit
+  repo_commit="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo "none")"
+  if [[ "${repo_commit}" != "${EXPECTED_COMMIT}" ]]; then
+    echo "DOCTOR FAIL: repo HEAD commit (${repo_commit}) drifted from launched commit (${EXPECTED_COMMIT})" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "${WORK_DIR}/fixtures/basic/test-base.yaml" ]] || [[ ! -f "${WORK_DIR}/fixtures/basic/test-head.yaml" ]]; then
+    echo "DOCTOR FAIL: baseline fixtures missing in ${WORK_DIR}/fixtures" >&2
+    exit 1
+  fi
+
+  if [[ ! -d "${PROOF_DIR}" ]] || [[ ! -w "${PROOF_DIR}" ]]; then
+    echo "DOCTOR FAIL: proof directory ${PROOF_DIR} is missing or not writable" >&2
+    exit 1
+  fi
+
+  local ver_out
+  ver_out="$("${BIN_PATH}" version)"
+  if [[ "${ver_out}" != *"commit: ${EXPECTED_COMMIT}"* ]]; then
+    echo "DOCTOR FAIL: binary version output did not match commit ${EXPECTED_COMMIT}: ${ver_out}" >&2
+    exit 1
+  fi
+
+  echo "DOCTOR OK"
+  echo "RUN_ID=${RUN_ID}"
+  echo "BIN_PATH=${BIN_PATH}"
+  echo "WORK_DIR=${WORK_DIR}"
+  echo "PROOF_DIR=${PROOF_DIR}"
+  echo "VERSION=${EXPECTED_VERSION}"
+  echo "COMMIT=${EXPECTED_COMMIT}"
+}
+
+cmd_run() {
+  if [[ ! -x "${BIN_PATH}" ]]; then
+    echo "ERROR: instance not launched at ${BIN_PATH}; run 'verify-cli launch' first" >&2
+    exit 1
+  fi
+
+  local artifact=""
+  local expect_exit=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --artifact)
+        artifact="$2"
+        shift 2
+        ;;
+      --expect-exit)
+        expect_exit="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        break
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  if [[ -z "${artifact}" ]]; then
+    echo "ERROR: --artifact <name> is required for 'verify-cli run'" >&2
+    exit 1
+  fi
+
+  local artifact_base="${PROOF_DIR}/${artifact}"
+  mkdir -p "$(dirname "${artifact_base}")"
+
+  local cmd_file="${artifact_base}.command.txt"
+  local stdout_file="${artifact_base}.stdout.txt"
+  local stderr_file="${artifact_base}.stderr.txt"
+  local exit_file="${artifact_base}.exit_code.txt"
+
+  printf 'k8s-manifest-diff' > "${cmd_file}"
+  for arg in "$@"; do
+    printf ' %q' "${arg}" >> "${cmd_file}"
+  done
+  printf '\n' >> "${cmd_file}"
+
+  set +e
+  (
+    cd "${WORK_DIR}"
+    "${BIN_PATH}" "$@"
+  ) >"${stdout_file}" 2>"${stderr_file}"
+  local actual_exit=$?
+  set -e
+
+  printf '%d\n' "${actual_exit}" > "${exit_file}"
+
+  echo "=== COMMAND ==="
+  cat "${cmd_file}"
+  echo "=== STDOUT ==="
+  cat "${stdout_file}"
+  if [[ -s "${stderr_file}" ]]; then
+    echo "=== STDERR ==="
+    cat "${stderr_file}"
+  fi
+  echo "=== EXIT_CODE: ${actual_exit} ==="
+  echo "=== PROOF: ${artifact_base}.{command,stdout,stderr,exit_code}.txt ==="
+
+  if [[ -n "${expect_exit}" ]]; then
+    if [[ "${actual_exit}" -ne "${expect_exit}" ]]; then
+      echo "ERROR: expected exit code ${expect_exit}, got ${actual_exit}" >&2
+      exit 99
+    fi
+    return 0
+  fi
+
+  return "${actual_exit}"
+}
+
+cmd_cleanup() {
+  if [[ -d "${WORK_DIR}" ]]; then
+    rm -rf "${WORK_DIR}"
+  fi
+  if [[ -d "${WORK_DIR}" ]]; then
+    echo "CLEANUP FAIL: work dir ${WORK_DIR} still exists" >&2
+    exit 1
+  fi
+  echo "CLEANUP OK"
+  echo "REMOVED_WORK_DIR=${WORK_DIR}"
+  echo "RETAINED_PROOF_DIR=${PROOF_DIR}"
+}
+
+main() {
+  local subcmd="${1:-}"
+  if [[ -z "${subcmd}" ]]; then
+    usage >&2
+    exit 2
+  fi
+  shift
+
+  case "${subcmd}" in
+    launch)
+      cmd_launch "$@"
+      ;;
+    doctor)
+      cmd_doctor "$@"
+      ;;
+    run)
+      cmd_run "$@"
+      ;;
+    cleanup)
+      cmd_cleanup "$@"
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      echo "Unknown subcommand: ${subcmd}" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"
